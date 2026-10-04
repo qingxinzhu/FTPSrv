@@ -838,6 +838,33 @@ static bool isClientEarlyClose(bool ok, unsigned long long moved, int err)
     return moved <= EARLY_CLOSE_MAX_BYTES;
 }
 
+// A multi-threaded reader (MT's file manager, most download managers that use
+// range requests) opens a data connection, reads one slice, closes it and comes
+// back for the next slice.  It closes while our send buffer still holds data,
+// so the peer's stack answers with RST and we see WSAECONNRESET - even though
+// nothing is broken.  Such a client keeps the CONTROL connection open and
+// waiting; a real network drop normally takes both channels down.
+// Used to answer 226 instead of 426 for that deliberate case: clients like MT
+// treat 426 as a hard failure and then retry the same slice again and again.
+static bool peerClosedDataOnPurpose(Session& s, bool ok, int err)
+{
+    if (ok) return false;
+    if (err != WSAECONNRESET && err != WSAECONNABORTED) return false;
+
+    fd_set rd;
+    FD_ZERO(&rd);
+    FD_SET(s.ctrl, &rd);
+    timeval tv;
+    tv.tv_sec  = 0;
+    tv.tv_usec = 0;
+    int n = select(0, &rd, nullptr, nullptr, &tv);
+    if (n <= 0) return true;              // nothing pending: control socket alive
+
+    char c = 0;
+    int k = recv(s.ctrl, &c, 1, MSG_PEEK);
+    return k > 0;                         // 0 = peer closed the control too
+}
+
 static void cmdRetr(Session& s, const std::string& argInternal)
 {
     Resolved r = resolvePath(s, argInternal);
@@ -906,8 +933,19 @@ static void cmdRetr(Session& s, const std::string& argInternal)
     closesocket(d);
     xferEnd(xh);
     bool early = isClientEarlyClose(ok, moved, g_lastSockErr);
+    bool deliberate = peerClosedDataOnPurpose(s, ok, g_lastSockErr);
     progEnd(pslot, moved, ok || early);       // no scary [aborted] for a client-side early close
     if (ok) reply(s, "226 Transfer complete.");
+    else if (deliberate) {
+        // The client closed its own data connection after the slice it wanted.
+        // Nothing is broken (the control connection is still up and waiting),
+        // and answering 426 would make multi-threaded clients report a hard
+        // failure and retry the same slice forever.
+        reply(s, "226 Transfer complete.");
+        logf("RETR %s resume=%llu: %.2f MB, client closed the data connection itself "
+             "(slice read) - replied 226",
+             leaf.c_str(), offset, (double)moved / 1048576.0);
+    }
     else {
         reply(s, "426 Connection closed; transfer aborted.");
         if (early)
