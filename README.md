@@ -1,7 +1,7 @@
 # FTPSrv · Windows 局域网 FTP 服务器
 
-Windows 上一个小巧的 FTP 服务器，专门做给**不想碰命令行**的人用：双击 exe → 点「启动服务」，
-这台电脑的全部硬盘（或指定的一个文件夹）就能被同一局域网里的手机 / 另一台电脑访问。
+Windows 上一个小巧的 FTP 服务器，给**不想碰命令行**的人做的：双击 exe → 点一下「启动服务」，
+这台电脑的硬盘（或者你指定的某个文件夹），就能被同一个 WiFi / 网线里的手机、别的电脑看到：能翻目录、能下载、也能往里传。
 
 |  |  |
 |---|---|
@@ -12,8 +12,9 @@ Windows 上一个小巧的 FTP 服务器，专门做给**不想碰命令行**的
 
 ## 两个版本，怎么选
 
-一份引擎（`ftpsrv_engine.inc`）+ 两个壳，**协议行为、稳定性、诊断日志完全一样**，
-区别只在"谁来画那一两行字"。按使用习惯挑就行。
+一份引擎（`ftpsrv_engine.inc`）+ 两个壳：**干活的代码、稳定性、日志都是同一套**，
+区别只在**你看到的样子** —— 一个是有窗口、能用鼠标点的，一个是在黑窗口里敲命令的。
+两个功能完全一样，挑自己顺手的那个就行（不会敲命令就选上面那个）。
 
 ### 图形版 `ftpsrv-gui.exe` —— 一般人用这个（推荐）
 
@@ -26,7 +27,8 @@ Windows 上一个小巧的 FTP 服务器，专门做给**不想碰命令行**的
 - **托盘**：点窗口右上角的 × 缩到右下角**继续跑**；双击托盘图标打开，右键停止 / 退出
 - 设置写进同目录的 `ftpsrv.ini`，下次打开自动带出来
 
-适合：自己家里用、给别人（朋友 / 家人）用、不想记参数、想随时看到"现在谁连着、跑多快"。
+**适合谁**：自己家里用；或者给**不太懂电脑的人**用（朋友、家人）—— 把 exe 发过去，让他双击、
+点一下「启动服务」就能用，**不用记任何参数**；窗口里随时能看到**现在有谁连着、传得有多快**。
 
 ### 命令行版 `ftpsrv.exe` —— 要脚本化、远程管理时用
 
@@ -48,7 +50,8 @@ Windows 上一个小巧的 FTP 服务器，专门做给**不想碰命令行**的
 
 `ftpsrv.exe --help` 看全部。传输时窗口底部**最多五行**原地刷新速度（超过五个并发时末行显示省略号 + 总速率），Ctrl+C 停服。
 
-适合：写成 `.bat` 丢进启动项 / 任务计划程序、或者用 `--allow` 收紧到"只给某一台设备"。
+**适合谁**：想让服务器**自己开机就悄悄跑起来**（写成一个 `.bat` 丢进启动项 / 任务计划，或者设成开机自启），
+或者只想**让某一台设备能连**（在 `--allow` 里填它的 IP）—— 这类"放手让它自动跑"的场合用它。
 
 ## 功能要点
 
@@ -114,9 +117,9 @@ MIT — 见 [LICENSE](LICENSE)。
 
 # FTPSrv (English)
 
-A tiny FTP server for Windows, made for people who do not want a command line: run the exe,
-click **Start**, and every drive (or one folder) of that PC becomes reachable from a phone or
-another computer on the same LAN.
+A small FTP server for Windows, made for people who do not want to touch a command line:
+double-click the exe, press **Start**, and the drives of that PC (or one folder you pick) show up
+on any phone or computer on the same Wi-Fi / LAN — browse it, download from it, upload to it.
 
 |  |  |
 |---|---|
@@ -127,8 +130,9 @@ another computer on the same LAN.
 
 ## Two builds, pick one
 
-One engine (`ftpsrv_engine.inc`) plus two thin shells: **same protocol behaviour, same
-stability work, same diagnostics** — the only difference is who draws those one or two lines.
+One engine (`ftpsrv_engine.inc`) plus two thin shells: **the same code does the work, the same
+stability work and the same logs** — the only difference is what you see: a window you click, or
+a console you type into. Both do the same job, so just pick whichever feels natural.
 
 ### The windowed build `ftpsrv-gui.exe` — what most people want
 
@@ -145,6 +149,9 @@ Double-click it and you get a small window (no console box; the task manager sho
   right-click to stop / quit
 - Settings are stored in `ftpsrv.ini` next to the exe and reloaded next time
 
+**Who it is for**: at home, or handing it to someone who is not a computer person (friends,
+family) — send them the exe, they double-click it and press Start; no flags to remember, and
+the window always shows who is connected and how fast it is going.
 ### The console build `ftpsrv.exe` — for scripts and remote machines
 
 Double-clicking also works (all drives, default account), but it really shines with flags:
@@ -164,7 +171,9 @@ Double-clicking also works (all drives, default account), but it really shines w
 | `--addfw` | add the Windows Firewall rules (needs administrator) |
 
 `ftpsrv.exe --help` prints the whole list. While transferring, the console rewrites up to five
-lines in place (past five transfers the last line shows "… +N more" plus the total rate);
+
+**Who it is for**: machines that should start sharing on their own (a `.bat` in the startup
+folder, or Task Scheduler), or locking the server down to one device with `--allow`.
 Ctrl+C stops the server.
 
 ## What's in it
