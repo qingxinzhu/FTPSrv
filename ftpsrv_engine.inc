@@ -288,6 +288,9 @@ struct Session {
     bool        idleTimeout = false;     // control connection hit the idle limit
     std::string lastCmd;                 // for the disconnect log line
     unsigned long long alloTotal = 0;    // size hint from ALLO (uploads only)
+    int  dataMode   = -1;                // -1 unknown, 0 = passive (client dials in), 1 = active (we dial out)
+    int  xferFails  = 0;                 // failed transfers on this control connection
+    bool modeHintLogged = false;         // the "try active mode" hint is printed once per connection
 };
 
 // convert internal UTF-8 <-> client character set
@@ -986,6 +989,15 @@ static void cmdRetr(Session& s, const std::string& argInternal)
             logf("RETR %s aborted after %llu bytes (socket error %d)",
                  leaf.c_str(), (unsigned long long)moved, g_lastSockErr);
             logIfOverParallel();
+            ++s.xferFails;
+            if (s.xferFails >= 3 && !s.modeHintLogged) {
+                s.modeHintLogged = true;
+                logf("hint: %d transfers on this connection have failed (mode: %s). If the client is "
+                     "using passive mode, try switching it to ACTIVE (PORT) - or make sure TCP %d-%d "
+                     "is allowed through the firewall / router",
+                     s.xferFails, s.dataMode == 1 ? "active" : "passive",
+                     g_cfg.pasvLow, g_cfg.pasvHigh);
+            }
         }
     }
 }
@@ -1090,6 +1102,15 @@ static void cmdStor(Session& s, const std::string& argInternal, bool append)
              (unsigned long long)moved, g_lastSockErr,
              (unsigned long long)(offset + moved));
         logIfOverParallel();
+        ++s.xferFails;
+        if (s.xferFails >= 3 && !s.modeHintLogged) {
+            s.modeHintLogged = true;
+            logf("hint: %d transfers on this connection have failed (mode: %s). If the client is "
+                 "using passive mode, try switching it to ACTIVE (PORT) - or make sure TCP %d-%d "
+                 "is allowed through the firewall / router",
+                 s.xferFails, s.dataMode == 1 ? "active" : "passive",
+                 g_cfg.pasvLow, g_cfg.pasvHigh);
+        }
     }
 }
 
@@ -1232,6 +1253,11 @@ static bool dispatch(Session& s, const std::string& line)
         unsigned short port = 0;
         std::string err;
         if (!ensurePassive(s, port, err)) { reply(s, "425 %s.", err.c_str()); return true; }
+        if (s.dataMode != 0) {
+            logf("data mode: passive (PASV) - the client dials back to us on TCP %d-%d (%s)",
+                 g_cfg.pasvLow, g_cfg.pasvHigh, s.peerIp.c_str());
+            s.dataMode = 0;
+        }
         std::string ip = localAddrOf(s);
         int a1 = 0, a2 = 0, a3 = 0, a4 = 0;
         sscanf(ip.c_str(), "%d.%d.%d.%d", &a1, &a2, &a3, &a4);
@@ -1243,6 +1269,11 @@ static bool dispatch(Session& s, const std::string& line)
         unsigned short port = 0;
         std::string err;
         if (!ensurePassive(s, port, err)) { reply(s, "425 %s.", err.c_str()); return true; }
+        if (s.dataMode != 0) {
+            logf("data mode: passive (EPSV) - the client dials back to us on TCP %d-%d (%s)",
+                 g_cfg.pasvLow, g_cfg.pasvHigh, s.peerIp.c_str());
+            s.dataMode = 0;
+        }
         reply(s, "229 Entering Extended Passive Mode (|||%u|).", (unsigned)port);
         return true;
     }
@@ -1259,6 +1290,10 @@ static bool dispatch(Session& s, const std::string& line)
         inet_pton(AF_INET, ipbuf, &s.act.sin_addr);
         s.act.sin_port = htons((unsigned short)((p1 << 8) | p2));
         s.hasAct = true;
+        if (s.dataMode != 1) {
+            logf("data mode: active (PORT) - we dial back to the client (%s)", s.peerIp.c_str());
+            s.dataMode = 1;
+        }
         if (s.pasv != INVALID_SOCKET) { closesocket(s.pasv); s.pasv = INVALID_SOCKET; }
         reply(s, "200 PORT command successful.");
         return true;
