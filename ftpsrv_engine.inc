@@ -883,6 +883,19 @@ static bool isClientEarlyClose(bool ok, unsigned long long moved, int err)
 }
 
 
+// Clients that open a dozen transfers at once starve themselves: the slowest
+// ones time out and all the user sees is "transfer failed".  Say so in the log,
+// so the next report is obvious at a glance.
+static void logIfOverParallel()
+{
+    int live = xferLiveCount();
+    if (live >= 8)
+        logf("  note: %d transfers were in flight at that moment - a client that opens "
+             "this many at once can starve itself and drop the slowest ones "
+             "(try fewer threads or smaller batches)",
+             live);
+}
+
 static void cmdRetr(Session& s, const std::string& argInternal)
 {
     Resolved r = resolvePath(s, argInternal);
@@ -969,9 +982,11 @@ static void cmdRetr(Session& s, const std::string& argInternal)
         if (early)
             logf("RETR %s: %.2f MB, client closed early (verify/thumbnail read - not an error)",
                  leaf.c_str(), (double)moved / 1048576.0);
-        else
+        else {
             logf("RETR %s aborted after %llu bytes (socket error %d)",
                  leaf.c_str(), (unsigned long long)moved, g_lastSockErr);
+            logIfOverParallel();
+        }
     }
 }
 
@@ -1074,6 +1089,7 @@ static void cmdStor(Session& s, const std::string& argInternal, bool append)
              append ? "APPE" : "STOR", leaf.c_str(),
              (unsigned long long)moved, g_lastSockErr,
              (unsigned long long)(offset + moved));
+        logIfOverParallel();
     }
 }
 
