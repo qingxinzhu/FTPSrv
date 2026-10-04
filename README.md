@@ -10,6 +10,46 @@ Windows 上一个小巧的 FTP 服务器，专门做给**不想碰命令行**的
 | 体积 / 依赖 | 约 1 MB 静态 exe，只依赖系统 DLL（ws2_32 / kernel32 / msvcrt / user32…） |
 | 默认 | 端口 `2121`，账号 `admin` / `admin` |
 
+## 两个版本，怎么选
+
+一份引擎（`ftpsrv_engine.inc`）+ 两个壳，**协议行为、稳定性、诊断日志完全一样**，
+区别只在"谁来画那一两行字"。按使用习惯挑就行。
+
+### 图形版 `ftpsrv-gui.exe` —— 一般人用这个（推荐）
+
+双击运行，出来一个小窗口（**不弹黑框**，任务栏里显示的是 `FTPSrv - LAN FTP file server`）：
+
+- **主窗口**：状态 / 当前地址（点「复制地址」一键拷走）、启动服务、停止服务、放行防火墙、
+  实时速度行、日志框（谁连过、传了什么、为什么断，一眼看到）
+- **设置…**：共享范围（全盘 / 指定文件夹）、账号密码、端口、并发上限、空闲超时、TCP 保活、
+  数据端口范围、IP 白名单、只读、日志、开机自启、托盘行为 —— 所有能调的都在这一个页面里
+- **托盘**：点窗口右上角的 × 缩到右下角**继续跑**；双击托盘图标打开，右键停止 / 退出
+- 设置写进同目录的 `ftpsrv.ini`，下次打开自动带出来
+
+适合：自己家里用、给别人（朋友 / 家人）用、不想记参数、想随时看到"现在谁连着、跑多快"。
+
+### 命令行版 `ftpsrv.exe` —— 要脚本化、远程管理时用
+
+双击也会跑（全盘共享 + 默认账号），但它真正的价值是**带参数启动**：
+
+| 参数 | 说明 |
+|---|---|
+| `--port N` | 监听端口，默认 `2121`（填 21 就能省掉地址里的端口号，需管理员/未被占用） |
+| `--root PATH` | 只共享某个目录，不写 = 全盘共享 |
+| `--user NAME` / `--pass WORD` | 登录账号 / 密码，默认 `admin` / `admin` |
+| `--anon` / `--readonly` | 允许匿名登录（匿名只读）/ 全部只读 |
+| `--allow LIST` | 只允许这些 IP / 网段连，如 `192.168.1.0/24,10.0.0.5` |
+| `--pasv-range L-H` | 数据通道端口范围，默认 `50000-50100` |
+| `--keepalive SEC` / `--idle SEC` | TCP 保活（默认 30，0 = 关）/ 空闲超时（默认 900） |
+| `--maxclients N` | 并发连接上限，默认 `64` |
+| `--log FILE` / `--noprogress` | 日志同时落盘 / 不画实时进度行 |
+| `--flush` | 上传完成后强制落盘再回 226（慢盘别开，见手册 FAQ） |
+| `--addfw` | 添加防火墙放行规则（需管理员） |
+
+`ftpsrv.exe --help` 看全部。传输时窗口底部**原地刷新一两行**速度（不刷屏），Ctrl+C 停服。
+
+适合：写成 `.bat` 丢进启动项 / 任务计划程序、或者用 `--allow` 收紧到"只给某一台设备"。
+
 ## 功能要点
 
 - **共享范围** —— 全部硬盘当虚拟根（`/C:/`、`/D:/`），或只共享一个文件夹
@@ -29,7 +69,7 @@ Windows 上一个小巧的 FTP 服务器，专门做给**不想碰命令行**的
 3. 手机 / 另一台电脑上随便一个 FTP 客户端（资源管理器、FileZilla、MT 管理器、Cx…）：
    主机 = 那个 IP，**端口 2121**，账号 = 你刚设的
 
-第一次运行 Windows 可能问防火墙 —— 勾「专用网络」允许即可。
+第一次运行 Windows 可能问防火墙 —— 勾「专用网络」允许即可（图形版也可以直接点「放行防火墙」按钮）。
 
 ## 编译
 
@@ -41,7 +81,7 @@ x86_64-w64-mingw32-g++ -O2 -std=c++17 -static -Wall -mwindows \
 ```
 
 `sh build.sh` 就是上面这套（windres 缺失会自动跳过图标）；Windows 下用 `build_win.bat`。
-一份引擎（`ftpsrv_engine.inc`）+ 两个壳，不带任何运行时依赖。
+一份引擎 + 两个壳，不带任何运行时依赖。
 
 ## 测试
 
@@ -85,6 +125,47 @@ another computer on the same LAN.
 | size / deps | ~1 MB static exe, only system DLLs (ws2_32, kernel32, msvcrt, user32…) |
 | defaults | port `2121`, login `admin` / `admin` |
 
+## Two builds, pick one
+
+One engine (`ftpsrv_engine.inc`) plus two thin shells: **same protocol behaviour, same
+stability work, same diagnostics** — the only difference is who draws those one or two lines.
+
+### The windowed build `ftpsrv-gui.exe` — what most people want
+
+Double-click it and you get a small window (no console box; the task manager shows it as
+`FTPSrv - LAN FTP file server`):
+
+- **Main window** — status, the current address (one click to copy), Start / Stop,
+  add firewall rules, a live speed line, and a log box that says who connected and why a
+  session ended
+- **Settings…** — share scope (all drives / one folder), account, port, concurrency, idle
+  timeout, TCP keep-alive, passive data-port range, IP allow list, read-only, log file,
+  autostart, tray behaviour: everything adjustable lives on that one page
+- **Tray** — the × hides the window and the server keeps running; double-click to reopen,
+  right-click to stop / quit
+- Settings are stored in `ftpsrv.ini` next to the exe and reloaded next time
+
+### The console build `ftpsrv.exe` — for scripts and remote machines
+
+Double-clicking also works (all drives, default account), but it really shines with flags:
+
+| Flag | Meaning |
+|---|---|
+| `--port N` | listen port, default `2121` (use 21 to drop the port from URLs) |
+| `--root PATH` | share one directory instead of every drive |
+| `--user NAME` / `--pass WORD` | account, default `admin` / `admin` |
+| `--anon` / `--readonly` | allow anonymous (read-only) / make everything read-only |
+| `--allow LIST` | only these IPs / CIDR blocks may connect, e.g. `192.168.1.0/24` |
+| `--pasv-range L-H` | passive data-port range, default `50000-50100` |
+| `--keepalive SEC` / `--idle SEC` | TCP keep-alive (30, 0 = off) / idle timeout (900) |
+| `--maxclients N` | concurrent connection limit, default `64` |
+| `--log FILE` / `--noprogress` | also write a log file / no live speed line |
+| `--flush` | flush uploads to disk before the `226` (skip it on slow disks) |
+| `--addfw` | add the Windows Firewall rules (needs administrator) |
+
+`ftpsrv.exe --help` prints the whole list. While transferring, the console rewrites one or two
+lines in place (no scrolling); Ctrl+C stops the server.
+
 ## What's in it
 
 - **Share mode** — every drive as a virtual root (`/C:/`, `/D:/`) or a single folder
@@ -108,12 +189,13 @@ another computer on the same LAN.
 3. On the phone / other PC use any FTP client (Explorer, FileZilla, MT Manager, Cx …):
    host = that IP, **port 2121**, the account you just set
 
-Windows may ask about the firewall the first time — allow the private network.
+Windows may ask about the firewall the first time — allow the private network
+(the GUI also has an "add firewall rules" button).
 
 ## Build
 
 Same two commands as in the Chinese section above, or `sh build.sh` / `build_win.bat`.
-One engine (`ftpsrv_engine.inc`) + two thin front ends — no runtime, no dependencies.
+One engine + two thin front ends — no runtime, no dependencies.
 
 ## Test
 
