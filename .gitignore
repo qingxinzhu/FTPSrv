@@ -1,0 +1,15 @@
+# build output / build intermediates
+bin/
+icon.res
+*.res
+*.o
+
+# runtime files (created by the program, not part of the source)
+ftpsrv.ini
+ftpsrv.log
+share/
+
+# editors / os
+.DS_Store
+Thumbs.db
+*~

@@ -1,0 +1,42 @@
+// ---------------------------------------------------------------------------
+//  Windows resources: the program icon + version info shown by Explorer.
+//  build.sh / build_win.bat compile this with windres and link the result into
+//  both ftpsrv.exe and ftpsrv-gui.exe.  Resource id 1 = the icon Windows uses
+//  for the file, the task bar and the tray.
+//
+//  Numeric constants are spelled out on purpose so windres does not need to
+//  pull in windows.h:
+//    FILEOS 0x40004L = VOS_NT_WINDOWS32      FILETYPE 0x1L = VFT_APP
+//    FILEFLAGSMASK 0x3fL, FILEFLAGS 0x0L
+// ---------------------------------------------------------------------------
+
+1 ICON "icon.ico"
+
+1 VERSIONINFO
+FILEVERSION     2,60,0,0
+PRODUCTVERSION  2,60,0,0
+FILEFLAGSMASK   0x3fL
+FILEFLAGS       0x0L
+FILEOS          0x40004L
+FILETYPE        0x1L
+FILESUBTYPE     0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "080404B0"
+        BEGIN
+            VALUE "CompanyName",      "FTPSrv\0"
+            VALUE "FileDescription",  "FTPSrv - LAN FTP file server\0"
+            VALUE "FileVersion",      "2.60\0"
+            VALUE "InternalName",     "ftpsrv\0"
+            VALUE "LegalCopyright",   "free to use\0"
+            VALUE "OriginalFilename", "ftpsrv.exe\0"
+            VALUE "ProductName",      "FTPSrv\0"
+            VALUE "ProductVersion",   "2.60\0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x804, 0x4B0
+    END
+END
