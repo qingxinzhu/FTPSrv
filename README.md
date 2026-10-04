@@ -52,7 +52,7 @@ Windows 上一个小巧的 FTP 服务器，给**不想碰命令行**的人做的
 - **独立设置页** —— 端口、账号、匿名、只读、空闲超时、TCP 保活、数据端口范围、IP 白名单、日志、开机自启
 - **实时速度行** —— **最多五行**原地刷新，不刷屏；并发的传输超过五个时，末行变成 `... +N more running, total X/s`（总速率）；传输结束留一条带平均速度的汇总
 - **大文件稳** —— 每个会话只开一个被动监听（不烧端口）、双通道 TCP 保活、1 MB 套接字缓冲、256 KB 传输块、`REST` 断点续传
-- **多线程客户端** —— MT 管理器式的分段/多线程上传不会再互相截断
+- **适配多线程传输** —— MT 管理器式的分段/多线程上传不会再互相截断
 - **可诊断** —— 每个会话都记录**为什么断**，传输失败带 Winsock 错误码；小于 8 MB 的客户端校验读取只记一行，不刷噪音
 - **托盘** —— 点 × 缩到托盘继续跑；双击打开，右键停止 / 退出
 - **图标 + 版本信息** —— 那只小鲸鱼就在 exe 里（`icon.rc`，资源 id 1）
@@ -174,7 +174,7 @@ Ctrl+C stops the server.
   a transfer leaves one summary line with the average speed
 - **Stable big transfers** — one passive listener reused per session (no port churn),
   TCP keep-alive on both channels, 1 MB socket buffers, 256 KB blocks, `REST` resume
-- **Multi-thread clients** — MT Manager style segmented uploads no longer truncate each other
+- **Multi-threaded transfers** — MT Manager style segmented uploads no longer truncate each other
 - **Diagnosable** — every session logs *why* it ended, failed transfers carry the Winsock
   error code, and small client-side verify reads are logged as a single quiet line
 - **Tray** — closing the window keeps serving; double-click to reopen, right-click to stop / quit
