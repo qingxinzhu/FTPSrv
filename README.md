@@ -59,7 +59,7 @@ Windows 上一个小巧的 FTP 服务器，给**不想碰命令行**的人做的
 
 ## 怎么用
 
-0. **下载**：[Releases](https://github.com/shatangji/FTPSrv/releases/latest) 里两个 exe 直接下（也可以直接点本仓库里的文件）
+0. **下载**：[Releases](https://github.com/qingxinzhu/FTPSrv/releases/latest) 里两个 exe 直接下（也可以直接点本仓库里的文件）
 1. `设置…` → 选「全盘共享」或「指定文件夹」，把账号改成自己的 → 确定
 2. `启动服务` → 窗口会显示形如 `ftp://192.168.1.10:2121/` 的地址
 3. 手机 / 另一台电脑上随便一个 FTP 客户端（资源管理器、FileZilla、MT 管理器、Cx…）：
@@ -182,7 +182,7 @@ Ctrl+C stops the server.
 
 ## Use it
 
-0. **Download**: grab either exe from [Releases](https://github.com/shatangji/FTPSrv/releases/latest)
+0. **Download**: grab either exe from [Releases](https://github.com/qingxinzhu/FTPSrv/releases/latest)
 1. `设置…` → pick *all drives* or one folder, set your own account → OK
 2. `启动服务` → the window shows an address like `ftp://192.168.1.10:2121/`
 3. On the phone / other PC use any FTP client (Explorer, FileZilla, MT Manager, Cx …):
