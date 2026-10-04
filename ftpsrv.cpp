@@ -18,7 +18,7 @@
 // ---------------------------------------------------------------------------
 // live progress: one or two lines that rewrite themselves (no scroll-spam)
 // ---------------------------------------------------------------------------
-#define PROG_SLOTS                 2
+#define PROG_SLOTS                 5
 #define PROG_BAR_CELLS             12
 #define PROG_MIN_INTERVAL_MS       200.0     // console redraw at most 5x per second
 #define PROG_FALLBACK_INTERVAL_MS  5000.0    // redirected stdout: one plain line / 5 s
@@ -137,10 +137,19 @@ static void progDraw_locked()
 {
     if (!g_progEnabled || !g_consoleOut) return;
 
-    std::string lines[PROG_SLOTS];
+    std::string lines[PROG_SLOTS + 1];   // +1 = the "... +N more" summary line
     int n = 0;
     for (int i = 0; i < PROG_SLOTS; ++i)
         if (g_prog[i].active) lines[n++] = progLineOf(g_prog[i]);
+
+    // more transfers than we have lines for: say how many and what they add up to
+    int live = xferLiveCount();
+    if (live > n) {
+        char ob[160];
+        snprintf(ob, sizeof(ob), "... +%d more running, total %s",
+                 live - n, fmtSpeed(xferSpeedNow()).c_str());
+        lines[n++] = ob;
+    }
 
     if (n == 0 && g_progLines == 0) return;
 
@@ -222,7 +231,6 @@ static void progTick(int slot, unsigned long long done)
         p.lastDone = done;
         p.lastMs   = t;
     }
-
     if (!g_progEnabled) return;
 
     if (!g_consoleOut) {
@@ -317,7 +325,7 @@ static void printHelp()
         "  --readonly        disable all write operations\n"
         "  --log FILE        append log to file\n"
         "  --idle SEC        idle/transfer timeout in seconds (default 900)\n"
-        "  --maxclients N    concurrent client limit (default 32)\n"
+        "  --maxclients N    concurrent client limit (default 64)\n"
         "  --keepalive SEC   TCP keep-alive idle seconds, 0=off (default 30)\n"
         "  --pasv-range L-H  data channel port range (default 50000-50100)\n"
         "  --flush           flush uploads to disk before answering 226 (slower, safer)\n"

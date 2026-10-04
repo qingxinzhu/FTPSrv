@@ -46,7 +46,7 @@ Windows 上一个小巧的 FTP 服务器，专门做给**不想碰命令行**的
 | `--flush` | 上传完成后强制落盘再回 226（慢盘别开，见手册 FAQ） |
 | `--addfw` | 添加防火墙放行规则（需管理员） |
 
-`ftpsrv.exe --help` 看全部。传输时窗口底部**原地刷新一两行**速度（不刷屏），Ctrl+C 停服。
+`ftpsrv.exe --help` 看全部。传输时窗口底部**最多五行**原地刷新速度（超过五个并发时末行显示省略号 + 总速率），Ctrl+C 停服。
 
 适合：写成 `.bat` 丢进启动项 / 任务计划程序、或者用 `--allow` 收紧到"只给某一台设备"。
 
@@ -54,7 +54,7 @@ Windows 上一个小巧的 FTP 服务器，专门做给**不想碰命令行**的
 
 - **共享范围** —— 全部硬盘当虚拟根（`/C:/`、`/D:/`），或只共享一个文件夹
 - **独立设置页** —— 端口、账号、匿名、只读、空闲超时、TCP 保活、数据端口范围、IP 白名单、日志、开机自启
-- **实时速度行** —— 只有一两行原地刷新，不刷屏；传输结束留一条带平均速度的汇总
+- **实时速度行** —— **最多五行**原地刷新，不刷屏；并发的传输超过五个时，末行变成 `... +N more running, total X/s`（总速率）；传输结束留一条带平均速度的汇总
 - **大文件稳** —— 每个会话只开一个被动监听（不烧端口）、双通道 TCP 保活、1 MB 套接字缓冲、256 KB 传输块、`REST` 断点续传
 - **多线程客户端** —— MT 管理器式的分段/多线程上传不会再互相截断
 - **可诊断** —— 每个会话都记录**为什么断**，传输失败带 Winsock 错误码；小于 8 MB 的客户端校验读取只记一行，不刷噪音
@@ -163,15 +163,17 @@ Double-clicking also works (all drives, default account), but it really shines w
 | `--flush` | flush uploads to disk before the `226` (skip it on slow disks) |
 | `--addfw` | add the Windows Firewall rules (needs administrator) |
 
-`ftpsrv.exe --help` prints the whole list. While transferring, the console rewrites one or two
-lines in place (no scrolling); Ctrl+C stops the server.
+`ftpsrv.exe --help` prints the whole list. While transferring, the console rewrites up to five
+lines in place (past five transfers the last line shows "… +N more" plus the total rate);
+Ctrl+C stops the server.
 
 ## What's in it
 
 - **Share mode** — every drive as a virtual root (`/C:/`, `/D:/`) or a single folder
 - **Settings page** — port, account, anonymous, read-only, idle timeout, keep-alive,
   passive data-port range, IP allow list, log file, autostart
-- **Live speed line** — one or two rewriting lines instead of a scrolling wall of text;
+- **Live speed line** — up to five rewriting lines instead of a scrolling wall of text; with
+  more than five transfers at once the last line becomes `... +N more running, total X/s`;
   a transfer leaves one summary line with the average speed
 - **Stable big transfers** — one passive listener reused per session (no port churn),
   TCP keep-alive on both channels, 1 MB socket buffers, 256 KB blocks, `REST` resume

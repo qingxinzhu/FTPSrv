@@ -17,6 +17,9 @@ trap 'rm -rf "$TMP"' EXIT
 
 awk '/#define PROG_SLOTS/{f=1} f&&/^\/\/ logging/{exit} f' "$SRC" > "$TMP/prog_engine.inc"
 echo "extracted $(wc -l < "$TMP/prog_engine.inc") lines of progress engine from $SRC"
+awk '/^\/\/ live-transfer accounting/{f=1} f{print} f&&/^\/\/ end of live-transfer accounting/{exit}' \
+    ../ftpsrv_engine.inc > "$TMP/xfer_engine.inc"
+echo "extracted $(wc -l < "$TMP/xfer_engine.inc") lines of transfer accounting from ../ftpsrv_engine.inc"
 
 cp progress_test.cpp "$TMP/progress_test.cpp"
 g++ -O1 -std=c++17 -Wall -o "$TMP/progress_test" "$TMP/progress_test.cpp"

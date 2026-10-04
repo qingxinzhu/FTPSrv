@@ -33,6 +33,10 @@
 #define IDC_PROG2         1010
 #define IDC_LOGLIST       1011
 #define IDC_BTN_CLEAR     1012
+#define IDC_PROG3         1013
+#define IDC_PROG4         1014
+#define IDC_PROG5         1015
+#define IDC_PROG6         1016
 
 #define IDS_MODE_ALL      1101
 #define IDS_MODE_DIR      1102
@@ -90,7 +94,9 @@ static HWND s_allow = nullptr, s_tray = nullptr;
 // main-window control handles
 static HWND m_status = nullptr, m_summary = nullptr, m_addr = nullptr;
 static HWND m_start = nullptr, m_stop = nullptr, m_set = nullptr, m_fw = nullptr, m_copy = nullptr;
-static HWND m_prog1 = nullptr, m_prog2 = nullptr, m_log = nullptr, m_clear = nullptr;
+static HWND m_prog1 = nullptr, m_prog2 = nullptr, m_prog3 = nullptr, m_prog4 = nullptr;
+static HWND m_prog5 = nullptr, m_prog6 = nullptr;
+static HWND m_log = nullptr, m_clear = nullptr;
 
 // ---------------------------------------------------------------------------
 // persisted settings
@@ -239,6 +245,8 @@ static void logf(const char* fmt, ...)
 // ---------------------------------------------------------------------------
 // progress slots (same semantics as the console build)
 // ---------------------------------------------------------------------------
+#define PROG_SLOTS 5                 // same as the console build
+
 struct ProgSlot {
     bool               active = false;
     bool               upload = false;
@@ -249,7 +257,7 @@ struct ProgSlot {
     double             speed = 0;
 };
 
-static ProgSlot   g_gp[2];
+static ProgSlot   g_gp[PROG_SLOTS];
 static std::mutex g_gpMx;
 
 static double gpNow()
@@ -295,7 +303,7 @@ static int progBegin(bool upload, const std::string& label, unsigned long long t
 {
     std::lock_guard<std::mutex> lk(g_gpMx);
     int slot = -1;
-    for (int i = 0; i < 2; ++i) if (!g_gp[i].active) { slot = i; break; }
+    for (int i = 0; i < PROG_SLOTS; ++i) if (!g_gp[i].active) { slot = i; break; }
     if (slot < 0) return -1;
 
     ProgSlot& p = g_gp[slot];
@@ -813,12 +821,13 @@ static void drainLog()
 
 static void refreshProgress()
 {
-    std::string out[2];
+    std::string out[PROG_SLOTS + 1];   // +1 = the "... +N more" summary line
     {
         std::lock_guard<std::mutex> lk(g_gpMx);
-        for (int i = 0; i < 2; ++i) {
+        int n = 0;
+        for (int i = 0; i < PROG_SLOTS; ++i) {
             ProgSlot& p = g_gp[i];
-            if (!p.active) { out[i].clear(); continue; }
+            if (!p.active) continue;
             char buf[256];
             if (p.total > 0) {
                 double frac = (double)p.done / (double)p.total;
@@ -835,11 +844,24 @@ static void refreshProgress()
                          p.upload ? "UP " : "DOWN", gClip(p.label, 16).c_str(),
                          gFmtBytes((double)p.done).c_str(), gFmtSpeed(p.speed).c_str());
             }
-            out[i] = buf;
+            out[n++] = buf;
+        }
+
+        // more transfers than lines: say how many and what they add up to
+        int live = xferLiveCount();
+        if (live > n) {
+            char b[192];
+            snprintf(b, sizeof(b), "... +%d more running, total %s",
+                     live - n, gFmtSpeed(xferSpeedNow()).c_str());
+            out[n++] = b;
         }
     }
     setText(m_prog1, u8ToW(out[0]));
     setText(m_prog2, u8ToW(out[1]));
+    setText(m_prog3, u8ToW(out[2]));
+    setText(m_prog4, u8ToW(out[3]));
+    setText(m_prog5, u8ToW(out[4]));
+    setText(m_prog6, u8ToW(out[5]));
 }
 
 // ---------------------------------------------------------------------------
@@ -931,13 +953,17 @@ static LRESULT CALLBACK mainProc(HWND h, UINT m, WPARAM wp, LPARAM lp)
 
         mk(h, 0, L"STATIC", L"传输进度（实时速度）：", SS_LEFT, 12, 132, 300, 18, -1, g_font);
         m_prog1 = mk(h, 0, L"STATIC", L"", SS_LEFTNOWORDWRAP, 12, 152, 480, 20, IDC_PROG1, g_fontMono);
-        m_prog2 = mk(h, 0, L"STATIC", L"", SS_LEFTNOWORDWRAP, 12, 174, 480, 20, IDC_PROG2, g_fontMono);
+        m_prog2 = mk(h, 0, L"STATIC", L"", SS_LEFTNOWORDWRAP, 12, 172, 480, 20, IDC_PROG2, g_fontMono);
+        m_prog3 = mk(h, 0, L"STATIC", L"", SS_LEFTNOWORDWRAP, 12, 192, 480, 20, IDC_PROG3, g_fontMono);
+        m_prog4 = mk(h, 0, L"STATIC", L"", SS_LEFTNOWORDWRAP, 12, 212, 480, 20, IDC_PROG4, g_fontMono);
+        m_prog5 = mk(h, 0, L"STATIC", L"", SS_LEFTNOWORDWRAP, 12, 232, 480, 20, IDC_PROG5, g_fontMono);
+        m_prog6 = mk(h, 0, L"STATIC", L"", SS_LEFTNOWORDWRAP, 12, 252, 480, 20, IDC_PROG6, g_fontMono);
 
-        mk(h, 0, L"BUTTON", L"日志", BS_GROUPBOX, 12, 200, 480, 200, -1, g_font);
+        mk(h, 0, L"BUTTON", L"日志", BS_GROUPBOX, 12, 280, 480, 200, -1, g_font);
         m_log = mk(h, WS_EX_CLIENTEDGE, L"LISTBOX", L"",
-                   WS_VSCROLL | WS_HSCROLL | LBS_NOINTEGRALHEIGHT | WS_TABSTOP, 24, 224, 456, 140, IDC_LOGLIST, g_fontMono);
+                   WS_VSCROLL | WS_HSCROLL | LBS_NOINTEGRALHEIGHT | WS_TABSTOP, 24, 304, 456, 140, IDC_LOGLIST, g_fontMono);
         SendMessageW(m_log, LB_SETHORIZONTALEXTENT, (WPARAM)1600, 0);   // long lines can be scrolled
-        m_clear = mk(h, 0, L"BUTTON", L"清空日志", BS_PUSHBUTTON, 388, 368, 92, 24, IDC_BTN_CLEAR, g_font);
+        m_clear = mk(h, 0, L"BUTTON", L"清空日志", BS_PUSHBUTTON, 388, 448, 92, 24, IDC_BTN_CLEAR, g_font);
 
         SetTimer(h, 1, 300, nullptr);
         EnableWindow(m_stop, FALSE);
@@ -1136,7 +1162,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
     loadSettings();
     if (g_set.autostart) g_autostartPending = true;
 
-    RECT r = { 0, 0, 504, 412 };
+    RECT r = { 0, 0, 504, 492 };
     DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
     AdjustWindowRectEx(&r, style, FALSE, 0);
 

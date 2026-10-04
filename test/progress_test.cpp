@@ -114,7 +114,8 @@ static FILE* makeTermOut()
 #define printf(...) fprintf(g_out, __VA_ARGS__)
 
 // ------------------------- the real code under test -------------------------
-#include "prog_engine.inc"
+#include "xfer_engine.inc"     // engine: live-transfer accounting (totals)
+#include "prog_engine.inc"     // console: the drawing engine
 
 // faithful copy of the logging path from ftpsrv.cpp
 static std::mutex g_logMx;
@@ -236,6 +237,63 @@ int main()
           lastLine.find("in ") != std::string::npos &&
           lastLine.find("/s)") != std::string::npos,
           lastLine);
+
+    // --- G: more concurrent transfers than lines -> "... +N more, total X/s" ---
+    // the engine registers every transfer (that is where the totals come from),
+    // but only the first five of them find a line to live on
+    int g1 = progBegin(false, "RETR one.bin", 0);   int e1 = xferBegin();
+    int gbase = g_term.lastNonBlank();               // row of the first slot line
+    int g2 = progBegin(false, "RETR two.bin", 0);   int e2 = xferBegin();
+    int g3 = progBegin(false, "RETR three.bin", 0); int e3 = xferBegin();
+    int g4 = progBegin(false, "RETR four.bin", 0);  int e4 = xferBegin();
+    int g5 = progBegin(false, "RETR five.bin", 0);  int e5 = xferBegin();
+    check("G1 five transfers fill exactly five lines",
+          g_term.lastNonBlank() == gbase + 4, g_term.rowStr(g_term.lastNonBlank()));
+
+    // two more transfers arrive: no line is left for them
+    int h1 = xferBegin();
+    int h2 = xferBegin();
+    double t0 = nowMs();                             // same clock the drawing engine uses
+    xferSet(h1, 4ULL * 1024 * 1024, t0);
+    xferSet(h2, 6ULL * 1024 * 1024, t0);
+    usleep(250000);                                  // ride out the redraw throttle
+    progTick(g1, 1ULL * 1024 * 1024);                // force a redraw
+    fflush(g_out);
+    check("G2 overflow line says how many more are running",
+          g_term.rowStr(gbase + 5).find("...") != std::string::npos &&
+          g_term.rowStr(gbase + 5).find("2 more") != std::string::npos,
+          g_term.rowStr(gbase + 5));
+    check("G3 five slot lines + one overflow line, nothing else",
+          g_term.lastNonBlank() == gbase + 5, g_term.rowStr(g_term.lastNonBlank()));
+
+    usleep(320000);                                  // let the aggregate rate settle
+    xferSet(h1, 20ULL * 1024 * 1024, t0 + 600.0);
+    xferSet(h2, 30ULL * 1024 * 1024, t0 + 600.0);
+    progTick(g1, 2ULL * 1024 * 1024);
+    fflush(g_out);
+    check("G4 overflow line carries the total speed",
+          g_term.rowStr(gbase + 5).find("total") != std::string::npos &&
+          g_term.rowStr(gbase + 5).find("B/s") != std::string::npos,
+          g_term.rowStr(gbase + 5));
+
+    xferEnd(h1); xferEnd(h2);
+    xferEnd(e1); xferEnd(e2); xferEnd(e3); xferEnd(e4); xferEnd(e5);
+    progEnd(g1, 1024, true);
+    progEnd(g2, 1024, true);
+    progEnd(g3, 1024, true);
+    progEnd(g4, 1024, true);
+    progEnd(g5, 1024, true);
+    fflush(g_out);
+    bool overflowGone = true, slotGone = true;
+    for (int i = 0; i <= g_term.lastNonBlank(); ++i) {
+        const std::string r = g_term.rowStr(i);
+        if (r.find("more running") != std::string::npos) overflowGone = false;
+        // a live progress line has no colon; the end-of-transfer summary does
+        if (r.find("RETR one.bin") != std::string::npos && r.find(":") == std::string::npos)
+            slotGone = false;
+    }
+    check("G5 every progress line (slots + overflow) is gone once the transfers end",
+          overflowGone && slotGone);
 
     // --- F: redirected stdout fallback (no console) ---
     g_consoleOut = false;

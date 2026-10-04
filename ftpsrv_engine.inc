@@ -127,6 +127,94 @@ static int  progBegin(bool upload, const std::string& label, unsigned long long 
 static void progTick(int slot, unsigned long long done);
 static void progEnd(int slot, unsigned long long done, bool ok);
 
+// ---------------------------------------------------------------------------
+// live-transfer accounting (shared by both frontends)
+//
+// Every file transfer registers here, so a frontend can tell the user how many
+// transfers are running in total and what they add up to in bytes/second - even
+// the ones that have no line of their own on screen.  The clock is passed in by
+// the caller, which keeps this block free of any Windows API (so it can be unit
+// tested on its own).
+// ---------------------------------------------------------------------------
+#define XFER_MAX 64
+
+struct XferRec {
+    bool               used = false;
+    unsigned long long done = 0;
+};
+
+static XferRec             g_xfer[XFER_MAX];
+static std::mutex          g_xferMx;
+static int                 g_xferLive   = 0;
+static double              g_xferSpeed  = 0;   // bytes/second, smoothed
+static double              g_xferLastMs = 0;
+static unsigned long long  g_xferLastSum = 0;
+
+static int xferBegin()
+{
+    std::lock_guard<std::mutex> lk(g_xferMx);
+    for (int i = 0; i < XFER_MAX; ++i) {
+        if (!g_xfer[i].used) {
+            g_xfer[i].used = true;
+            g_xfer[i].done = 0;
+            ++g_xferLive;
+            return i;
+        }
+    }
+    ++g_xferLive;                  // still count it, it just cannot be summed
+    return -1;
+}
+
+static void xferSet(int h, unsigned long long done, double nowMs)
+{
+    std::lock_guard<std::mutex> lk(g_xferMx);
+    if (h >= 0 && h < XFER_MAX && g_xfer[h].used) g_xfer[h].done = done;
+
+    unsigned long long sum  = 0;
+    for (int i = 0; i < XFER_MAX; ++i)
+        if (g_xfer[i].used) sum += g_xfer[i].done;
+
+    if (g_xferLastMs <= 0.0) { g_xferLastMs = nowMs; g_xferLastSum = sum; return; }
+
+    double dt = (nowMs - g_xferLastMs) / 1000.0;
+    if (dt < 0.25) return;
+
+    double inst = (sum >= g_xferLastSum) ? (double)(sum - g_xferLastSum) / dt : 0.0;
+    g_xferSpeed = (g_xferSpeed > 0.0) ? (g_xferSpeed * 0.65 + inst * 0.35) : inst;
+    g_xferLastSum = sum;
+    g_xferLastMs  = nowMs;
+}
+
+static void xferEnd(int h)
+{
+    std::lock_guard<std::mutex> lk(g_xferMx);
+    if (h >= 0 && h < XFER_MAX && g_xfer[h].used) {
+        g_xfer[h].used = false;
+        g_xfer[h].done = 0;
+    }
+    if (g_xferLive > 0) --g_xferLive;
+    if (g_xferLive <= 0) {         // nothing running: start the next batch clean
+        g_xferLive    = 0;
+        g_xferSpeed   = 0.0;
+        g_xferLastMs  = 0.0;
+        g_xferLastSum = 0;
+    }
+}
+
+static int xferLiveCount()
+{
+    std::lock_guard<std::mutex> lk(g_xferMx);
+    return g_xferLive;
+}
+
+static double xferSpeedNow()
+{
+    std::lock_guard<std::mutex> lk(g_xferMx);
+    return g_xferSpeed;
+}
+// end of live-transfer accounting
+// ---------------------------------------------------------------------------
+
 // live session sockets, so engineStop() can kick idle clients off the port
 static std::mutex          g_sessMx;
 static std::vector<SOCKET> g_sessSocks;
@@ -800,6 +888,7 @@ static void cmdRetr(Session& s, const std::string& argInternal)
 
     unsigned long long left = (fileSize > offset) ? (fileSize - offset) : 0;
     int pslot = progBegin(false, "RETR " + leaf, left);
+    int xh = xferBegin();          // counted globally, for the frontend totals
 
     std::vector<char> buf(256 * 1024);      // fewer syscalls = faster on big files
     bool ok = true;
@@ -811,9 +900,11 @@ static void cmdRetr(Session& s, const std::string& argInternal)
         if (!sendAll(d, buf.data(), (size_t)got)) { ok = false; break; }
         moved += (unsigned long long)got;
         progTick(pslot, moved);
+        xferSet(xh, moved, (double)GetTickCount64());
     }
     CloseHandle(h);
     closesocket(d);
+    xferEnd(xh);
     bool early = isClientEarlyClose(ok, moved, g_lastSockErr);
     progEnd(pslot, moved, ok || early);       // no scary [aborted] for a client-side early close
     if (ok) reply(s, "226 Transfer complete.");
@@ -895,6 +986,7 @@ static void cmdStor(Session& s, const std::string& argInternal, bool append)
     unsigned long long total = 0;
     if (!append && s.alloTotal > offset) total = s.alloTotal - offset;
     int pslot = progBegin(true, (append ? "APPE " : "STOR ") + leaf, total);
+    int xh = xferBegin();          // counted globally, for the frontend totals
 
     std::vector<char> buf(256 * 1024);      // fewer syscalls = faster on big files
     bool ok = true;
@@ -910,7 +1002,9 @@ static void cmdStor(Session& s, const std::string& argInternal, bool append)
         }
         moved += (unsigned long long)got;
         progTick(pslot, moved);
+        xferSet(xh, moved, (double)GetTickCount64());
     }
+    xferEnd(xh);
     if (ok && g_cfg.flushOnFinish) FlushFileBuffers(h);   // off by default: a slow disk would make the 226 late
     CloseHandle(h);
     uploadEnd(r.phys);
