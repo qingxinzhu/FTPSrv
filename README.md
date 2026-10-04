@@ -152,6 +152,7 @@ Double-click it and you get a small window (no console box; the task manager sho
 **Who it is for**: at home, or handing it to someone who is not a computer person (friends,
 family) — send them the exe, they double-click it and press Start; no flags to remember, and
 the window always shows who is connected and how fast it is going.
+
 ### The console build `ftpsrv.exe` — for scripts and remote machines
 
 Double-clicking also works (all drives, default account), but it really shines with flags:
@@ -171,10 +172,12 @@ Double-clicking also works (all drives, default account), but it really shines w
 | `--addfw` | add the Windows Firewall rules (needs administrator) |
 
 `ftpsrv.exe --help` prints the whole list. While transferring, the console rewrites up to five
+lines in place (past five transfers the last line shows "... +N more" plus the total rate);
+Ctrl+C stops the server.
 
 **Who it is for**: machines that should start sharing on their own (a `.bat` in the startup
 folder, or Task Scheduler), or locking the server down to one device with `--allow`.
-Ctrl+C stops the server.
+
 
 ## What's in it
 
