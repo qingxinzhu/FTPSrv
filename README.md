@@ -1,4 +1,3 @@
-# FTPSrv · Windows 局域网 FTP 服务器
 
 Windows 上一个小巧的 FTP 服务器，给**不想碰命令行**的人做的：双击 exe → 点一下「启动服务」，
 这台电脑的硬盘（或者你指定的某个文件夹），就能被同一个 WiFi / 网线里的手机、别的电脑看到：能翻目录、能下载、也能往里传。
@@ -14,9 +13,9 @@ Windows 上一个小巧的 FTP 服务器，给**不想碰命令行**的人做的
 
 一份引擎（`ftpsrv_engine.inc`）+ 两个壳：**干活的代码、稳定性、日志都是同一套**，
 区别只在**你看到的样子** —— 一个是有窗口、能用鼠标点的，一个是在黑窗口里敲命令的。
-两个功能完全一样，挑自己顺手的那个就行（不会敲命令就选上面那个）。
+两个功能完全一样，挑顺手的那个就行。
 
-### 图形版 `ftpsrv-gui.exe` —— 一般用这个（推荐）
+### 图形版 `ftpsrv-gui.exe`（推荐）
 
 双击运行，出来一个小窗口（**不弹黑框**，任务栏里显示的是 `FTPSrv - LAN FTP file server`）：
 
@@ -26,7 +25,6 @@ Windows 上一个小巧的 FTP 服务器，给**不想碰命令行**的人做的
   数据端口范围、IP 白名单、只读、日志、开机自启、托盘行为 —— 所有能调的都在这一个页面里
 - **托盘**：点窗口右上角的 × 缩到右下角**继续跑**；双击托盘图标打开，右键停止 / 退出
 - 设置写进同目录的 `ftpsrv.ini`，下次打开自动带出来
-
 
 ### 命令行版 `ftpsrv.exe` —— 要脚本化、远程管理时用
 
@@ -47,9 +45,6 @@ Windows 上一个小巧的 FTP 服务器，给**不想碰命令行**的人做的
 | `--addfw` | 添加防火墙放行规则（需管理员） |
 
 `ftpsrv.exe --help` 看全部。传输时窗口底部**最多五行**原地刷新速度（超过五个并发时末行显示省略号 + 总速率），Ctrl+C 停服。
-
-**适合谁**：想让服务器**自己开机就悄悄跑起来**（写成一个 `.bat` 丢进启动项 / 任务计划，或者设成开机自启），
-或者只想**让某一台设备能连**（在 `--allow` 里填它的 IP）—— 这类"放手让它自动跑"的场合用它。
 
 ## 功能要点
 
@@ -132,7 +127,7 @@ One engine (`ftpsrv_engine.inc`) plus two thin shells: **the same code does the 
 stability work and the same logs** — the only difference is what you see: a window you click, or
 a console you type into. Both do the same job, so just pick whichever feels natural.
 
-### The windowed build `ftpsrv-gui.exe` — what most people want
+### The windowed build `ftpsrv-gui.exe` (recommended)
 
 Double-click it and you get a small window (no console box; the task manager shows it as
 `FTPSrv - LAN FTP file server`):
@@ -147,11 +142,7 @@ Double-click it and you get a small window (no console box; the task manager sho
   right-click to stop / quit
 - Settings are stored in `ftpsrv.ini` next to the exe and reloaded next time
 
-**Who it is for**: at home, or handing it to someone who is not a computer person (friends,
-family) — send them the exe, they double-click it and press Start; no flags to remember, and
-the window always shows who is connected and how fast it is going.
-
-### The console build `ftpsrv.exe` — for scripts and remote machines
+### The console build `ftpsrv.exe`
 
 Double-clicking also works (all drives, default account), but it really shines with flags:
 
@@ -172,10 +163,6 @@ Double-clicking also works (all drives, default account), but it really shines w
 `ftpsrv.exe --help` prints the whole list. While transferring, the console rewrites up to five
 lines in place (past five transfers the last line shows "... +N more" plus the total rate);
 Ctrl+C stops the server.
-
-**Who it is for**: machines that should start sharing on their own (a `.bat` in the startup
-folder, or Task Scheduler), or locking the server down to one device with `--allow`.
-
 
 ## What's in it
 
