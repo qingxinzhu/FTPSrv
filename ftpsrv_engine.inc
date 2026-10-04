@@ -90,6 +90,7 @@ struct Config {
     bool         readonly  = false;
     std::string  logPath;
     int          idleSec   = 900;
+    int          dataIdleSec = 60;   // data channel: no bytes for this long = peer gone
     int          maxClients = 64;   // multi-threaded clients use several at once
     int          keepAliveSec = 30;   // TCP keep-alive idle time (0 = off)
     int          pasvLow  = PASV_PORT_LOW;   // passive data port range (data channel)
@@ -630,7 +631,12 @@ static bool ensurePassive(Session& s, unsigned short& port, std::string& err)
 
 static SOCKET tuneDataSocket(SOCKET d)
 {
-    int tv = g_cfg.idleSec * 1000;
+    // Data channels get their own (much shorter) silence timeout: a control
+    // connection may sit idle for minutes, but a transfer that moves no bytes
+    // for a minute means the peer is gone.  Without this a stalled upload kept
+    // its thread (and the client's task) hanging until the 900 s control limit.
+    int ds = (g_cfg.dataIdleSec > 0) ? g_cfg.dataIdleSec : (g_cfg.idleSec > 0 ? g_cfg.idleSec : 60);
+    int tv = ds * 1000;
     setsockopt(d, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
     setsockopt(d, SOL_SOCKET, SO_SNDTIMEO, (const char*)&tv, sizeof(tv));
 
@@ -679,6 +685,33 @@ static bool isDeadDataConn(SOCKET d)
         return (e != WSAEWOULDBLOCK && e != WSAETIMEDOUT);
     }
     return false;                          // real data pending (upload): keep it
+}
+
+// A multi-threaded reader (MT's file manager, most download managers that use
+// range requests) opens a data connection, reads one slice, closes it and comes
+// back for the next slice.  It closes while our send buffer still holds data,
+// so the peer's stack answers with RST and we see WSAECONNRESET - even though
+// nothing is broken.  Such a client keeps the CONTROL connection open and
+// waiting; a real network drop normally takes both channels down.
+// Used to answer 226 instead of 426 for that deliberate case: clients like MT
+// treat 426 as a hard failure and then retry the same slice again and again.
+static bool peerClosedDataOnPurpose(Session& s, bool ok, int err)
+{
+    if (ok) return false;
+    if (err != WSAECONNRESET && err != WSAECONNABORTED) return false;
+
+    fd_set rd;
+    FD_ZERO(&rd);
+    FD_SET(s.ctrl, &rd);
+    timeval tv;
+    tv.tv_sec  = 0;
+    tv.tv_usec = 0;
+    int n = select(0, &rd, nullptr, nullptr, &tv);
+    if (n <= 0) return true;              // nothing pending: control socket alive
+
+    char c = 0;
+    int k = recv(s.ctrl, &c, 1, MSG_PEEK);
+    return k > 0;                         // 0 = peer closed the control too
 }
 
 static SOCKET dataConnect(Session& s, std::string& err)
@@ -779,8 +812,19 @@ static void cmdList(Session& s, const std::string& argInternal, bool namesOnly)
 
     bool ok = sendAll(d, content);
     closesocket(d);
-    if (ok) reply(s, "226 Transfer complete.");
-    else    reply(s, "426 Connection closed; transfer aborted.");
+    if (ok) {
+        reply(s, "226 Transfer complete.");
+    } else if (peerClosedDataOnPurpose(s, ok, g_lastSockErr)) {
+        // the client read the part of the listing it wanted and closed the data
+        // connection itself - not a server-side failure (see FAQ 9)
+        reply(s, "226 Transfer complete.");
+        logf("LIST: client closed the data connection itself (%u bytes queued) - replied 226 (%s)",
+             (unsigned)content.size(), s.peerIp.c_str());
+    } else {
+        reply(s, "426 Connection closed; transfer aborted.");
+        logf("LIST failed after %u bytes (socket error %d) (%s)",
+             (unsigned)content.size(), g_lastSockErr, s.peerIp.c_str());
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -838,32 +882,6 @@ static bool isClientEarlyClose(bool ok, unsigned long long moved, int err)
     return moved <= EARLY_CLOSE_MAX_BYTES;
 }
 
-// A multi-threaded reader (MT's file manager, most download managers that use
-// range requests) opens a data connection, reads one slice, closes it and comes
-// back for the next slice.  It closes while our send buffer still holds data,
-// so the peer's stack answers with RST and we see WSAECONNRESET - even though
-// nothing is broken.  Such a client keeps the CONTROL connection open and
-// waiting; a real network drop normally takes both channels down.
-// Used to answer 226 instead of 426 for that deliberate case: clients like MT
-// treat 426 as a hard failure and then retry the same slice again and again.
-static bool peerClosedDataOnPurpose(Session& s, bool ok, int err)
-{
-    if (ok) return false;
-    if (err != WSAECONNRESET && err != WSAECONNABORTED) return false;
-
-    fd_set rd;
-    FD_ZERO(&rd);
-    FD_SET(s.ctrl, &rd);
-    timeval tv;
-    tv.tv_sec  = 0;
-    tv.tv_usec = 0;
-    int n = select(0, &rd, nullptr, nullptr, &tv);
-    if (n <= 0) return true;              // nothing pending: control socket alive
-
-    char c = 0;
-    int k = recv(s.ctrl, &c, 1, MSG_PEEK);
-    return k > 0;                         // 0 = peer closed the control too
-}
 
 static void cmdRetr(Session& s, const std::string& argInternal)
 {
