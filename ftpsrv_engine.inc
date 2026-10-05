@@ -290,6 +290,8 @@ struct Session {
     unsigned long long alloTotal = 0;    // size hint from ALLO (uploads only)
     int  dataMode   = -1;                // -1 unknown, 0 = passive (client dials in), 1 = active (we dial out)
     int  xferFails  = 0;                 // failed transfers on this control connection
+    int  slowBlocks = 0;                 // writes that took far longer than they should
+    bool slowDiskLogged = false;         // "the disk is the bottleneck" warning already printed
     bool modeHintLogged = false;         // the "try active mode" hint is printed once per connection
 };
 
@@ -992,9 +994,11 @@ static void cmdRetr(Session& s, const std::string& argInternal)
             ++s.xferFails;
             if (s.xferFails >= 3 && !s.modeHintLogged) {
                 s.modeHintLogged = true;
-                logf("hint: %d transfers on this connection have failed (mode: %s). If the client is "
-                     "using passive mode, try switching it to ACTIVE (PORT) - or make sure TCP %d-%d "
-                     "is allowed through the firewall / router",
+                logf("hint: %d transfers on this connection have failed (mode: %s). Things worth "
+                     "checking: (1) switch the client to ACTIVE (PORT) if it uses passive mode, or let "
+                     "TCP %d-%d through the firewall / router; (2) a slow target disk - a spinning disk "
+                     "with many parallel transfers stalls exactly like this; (3) fewer threads / smaller "
+                     "batches in the client",
                      s.xferFails, s.dataMode == 1 ? "active" : "passive",
                      g_cfg.pasvLow, g_cfg.pasvHigh);
             }
@@ -1079,9 +1083,27 @@ static void cmdStor(Session& s, const std::string& argInternal, bool append)
         if (got == 0) break;
         if (got < 0) { ok = false; g_lastSockErr = WSAGetLastError(); break; }
         DWORD wrote = 0;
-        if (!WriteFile(h, buf.data(), (DWORD)got, &wrote, nullptr) || wrote != (DWORD)got) {
+        ULONGLONG wt0 = GetTickCount64();
+        BOOL wok = WriteFile(h, buf.data(), (DWORD)got, &wrote, nullptr);
+        ULONGLONG wms = GetTickCount64() - wt0;
+        if (!wok || wrote != (DWORD)got) {
             ok = false;
             break;
+        }
+        // A 256 KB write should take a millisecond or two.  When several uploads
+        // land on a spinning disk at once the head starts seeking between files
+        // and each write takes tens of milliseconds - the transfers crawl, the
+        // client gives up on the slow ones and the user only sees "failed".
+        // Say so once per connection instead of leaving them guessing.
+        if (wms >= 100) {
+            if (++s.slowBlocks >= 8 && !s.slowDiskLogged) {
+                s.slowDiskLogged = true;
+                logf("slow disk: writing a 256 KB block took %llu ms - with %d transfers at once a "
+                     "spinning disk behaves like this (an SSD, or fewer parallel transfers, fixes it) (%s)",
+                     (unsigned long long)wms, xferLiveCount(), s.peerIp.c_str());
+            }
+        } else if (wms < 20 && s.slowBlocks > 0) {
+            s.slowBlocks = 0;            // the disk caught up again
         }
         moved += (unsigned long long)got;
         progTick(pslot, moved);
