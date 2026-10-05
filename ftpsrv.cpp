@@ -328,6 +328,8 @@ static void printHelp()
         "  --maxclients N    concurrent client limit (default 64)\n"
         "  --keepalive SEC   TCP keep-alive idle seconds, 0=off (default 30)\n"
         "  --pasv-range L-H  data channel port range (default 50000-50100)\n"
+        "  --block KB        read/write block size in KB, 16-4096 (default 256;\n"
+        "                    bigger = fewer disk seeks on a slow disk)\n"
         "  --flush           flush uploads to disk before answering 226 (slower, safer)\n"
         "  --allow LIST      only these client IPs may connect, e.g. 192.168.1.0/24\n"
         "  --addfw           add Windows Firewall rules (run as administrator)\n"
@@ -387,6 +389,7 @@ int main(int argc, char** argv)
         else if (a == "--idle")       g_cfg.idleSec = atoi(next("900").c_str());
         else if (a == "--maxclients") g_cfg.maxClients = atoi(next("64").c_str());
         else if (a == "--keepalive")  g_cfg.keepAliveSec = atoi(next("30").c_str());
+        else if (a == "--block")      g_cfg.blockKB = atoi(next("256").c_str());
         else if (a == "--pasv-range") {
             std::string v = next("50000-50100");
             size_t d = v.find('-');
@@ -408,6 +411,7 @@ int main(int argc, char** argv)
     if (g_cfg.idleSec <= 0) g_cfg.idleSec = 900;
     if (g_cfg.maxClients <= 0) g_cfg.maxClients = 32;
     if (g_cfg.keepAliveSec < 0) g_cfg.keepAliveSec = 0;
+    clampBlock();
     clampPasvRange();
 
     if (!g_cfg.rootDir.empty()) {
@@ -437,6 +441,7 @@ int main(int argc, char** argv)
     printf("  clients  : max %d, idle timeout %d s\n", g_cfg.maxClients, g_cfg.idleSec);
     printf("  data ports: %d-%d (passive data channel; firewall must allow it too)\n",
            g_cfg.pasvLow, g_cfg.pasvHigh);
+    printf("  block    : %d KB per read/write (bigger = fewer disk seeks)\n", g_cfg.blockKB);
     printf("  progress : %s\n", g_progEnabled
            ? (g_consoleOut ? "on  (live speed, rewriting 1-2 lines)"
                            : "on  (stdout redirected: one line every 5 s)")

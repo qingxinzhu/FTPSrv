@@ -93,6 +93,7 @@ struct Config {
     int          dataIdleSec = 60;   // data channel: no bytes for this long = peer gone
     int          maxClients = 64;   // multi-threaded clients use several at once
     int          keepAliveSec = 30;   // TCP keep-alive idle time (0 = off)
+    int          blockKB   = 256;    // read/write block in KB (bigger = fewer disk seeks)
     int          pasvLow  = PASV_PORT_LOW;   // passive data port range (data channel)
     int pasvHigh = PASV_PORT_HIGH;
     bool flushOnFinish = false;      // false: reply 226 at once (slow disks would stall)
@@ -105,7 +106,28 @@ static std::atomic<bool>  g_run(true);
 static std::string        g_primaryIp = "127.0.0.1";
 static int                g_lastSockErr = 0;   // last send/recv error, for the log
 
+// read/write block: 16 KB .. 4 MB (one buffer per transfer)
+static void clampBlock()
+{
+    if (g_cfg.blockKB < 16)   g_cfg.blockKB = 16;
+    if (g_cfg.blockKB > 4096) g_cfg.blockKB = 4096;
+}
+static size_t blockBytes()
+{
+    return (size_t)(g_cfg.blockKB > 0 ? g_cfg.blockKB : 256) * 1024;
+}
 // keep the data-port range inside sane bounds (also used by the firewall rule)
+// true when the socket has data (or closed) within ms
+static bool waitReadableMs(SOCKET d, int ms)
+{
+    fd_set rd;
+    FD_ZERO(&rd);
+    FD_SET(d, &rd);
+    timeval tv;
+    tv.tv_sec  = ms / 1000;
+    tv.tv_usec = (ms % 1000) * 1000;
+    return select(0, &rd, nullptr, nullptr, &tv) > 0;
+}
 static void clampPasvRange()
 {
     if (g_cfg.pasvLow  < 1024)     g_cfg.pasvLow  = PASV_PORT_LOW;
@@ -953,7 +975,7 @@ static void cmdRetr(Session& s, const std::string& argInternal)
     int pslot = progBegin(false, "RETR " + leaf, left);
     int xh = xferBegin();          // counted globally, for the frontend totals
 
-    std::vector<char> buf(256 * 1024);      // fewer syscalls = faster on big files
+    std::vector<char> buf(blockBytes());    // --block KB: fewer syscalls / disk seeks
     bool ok = true;
     unsigned long long moved = 0;
     for (;;) {
@@ -1075,13 +1097,31 @@ static void cmdStor(Session& s, const std::string& argInternal, bool append)
     int pslot = progBegin(true, (append ? "APPE " : "STOR ") + leaf, total);
     int xh = xferBegin();          // counted globally, for the frontend totals
 
-    std::vector<char> buf(256 * 1024);      // fewer syscalls = faster on big files
+    std::vector<char> buf(blockBytes());    // --block KB: fewer syscalls / disk seeks
     bool ok = true;
     unsigned long long moved = 0;
     for (;;) {
-        int got = recv(d, buf.data(), (int)buf.size(), 0);
-        if (got == 0) break;
-        if (got < 0) { ok = false; g_lastSockErr = WSAGetLastError(); break; }
+        // Gather one whole block before touching the disk.  A multi-threaded
+        // client sends in many small pieces; writing each piece on its own
+        // makes a spinning disk seek between files on every single write.
+        // Waiting a few milliseconds for the buffer to fill turns that into
+        // one larger sequential write.  Nothing is held back longer than the
+        // short wait below, so progress and timeouts are unaffected.
+        size_t have = 0;
+        for (;;) {
+            int got = recv(d, buf.data() + have, (int)(buf.size() - have), 0);
+            if (got <= 0) {
+                if (got < 0) { ok = false; g_lastSockErr = WSAGetLastError(); }
+                break;
+            }
+            have += (size_t)got;
+            if (have >= buf.size()) break;        // block full
+            if (buf.size() - have < 4096) break;  // no room for a useful read
+            if (!waitReadableMs(d, 20)) break;    // socket is dry: write now
+        }
+        if (!ok) break;
+        if (have == 0) break;                     // peer finished, buffer empty
+        int got = (int)have;
         DWORD wrote = 0;
         ULONGLONG wt0 = GetTickCount64();
         BOOL wok = WriteFile(h, buf.data(), (DWORD)got, &wrote, nullptr);
@@ -1098,9 +1138,10 @@ static void cmdStor(Session& s, const std::string& argInternal, bool append)
         if (wms >= 100) {
             if (++s.slowBlocks >= 8 && !s.slowDiskLogged) {
                 s.slowDiskLogged = true;
-                logf("slow disk: writing a 256 KB block took %llu ms - with %d transfers at once a "
-                     "spinning disk behaves like this (an SSD, or fewer parallel transfers, fixes it) (%s)",
-                     (unsigned long long)wms, xferLiveCount(), s.peerIp.c_str());
+                logf("slow disk: writing a %d KB block took %llu ms - with %d transfers at once a "
+                     "spinning disk behaves like this (an SSD, fewer parallel transfers, or a "
+                     "bigger --block helps) (%s)",
+                     g_cfg.blockKB, (unsigned long long)wms, xferLiveCount(), s.peerIp.c_str());
             }
         } else if (wms < 20 && s.slowBlocks > 0) {
             s.slowBlocks = 0;            // the disk caught up again

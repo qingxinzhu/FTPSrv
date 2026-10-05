@@ -22,7 +22,7 @@ Windows 上一个小巧的 FTP 服务器：双击 exe → 点一下「启动服�
 - **主窗口**：状态 / 当前地址（点「复制地址」一键拷走）、启动服务、停止服务、放行防火墙、
   实时速度行、日志框（谁连过、传了什么、为什么断，一眼看到）
 - **设置…**：共享范围（全盘 / 指定文件夹）、账号密码、端口、并发上限、空闲超时、TCP 保活、
-  数据端口范围、IP 白名单、只读、日志、开机自启、托盘行为 —— 所有能调的都在这一个页面里
+  数据端口范围、写入块大小、IP 白名单、只读、日志、开机自启、托盘行为 —— 所有能调的都在这一个页面里
 - **托盘**：点窗口右上角的 × 缩到右下角**继续跑**；双击托盘图标打开，右键停止 / 退出
 - 设置写进同目录的 `ftpsrv.ini`，下次打开自动带出来
 
@@ -39,6 +39,7 @@ Windows 上一个小巧的 FTP 服务器：双击 exe → 点一下「启动服�
 | `--allow LIST` | 只允许这些 IP / 网段连，如 `192.168.1.0/24,10.0.0.5` |
 | `--pasv-range L-H` | 数据通道端口范围，默认 `50000-50100` |
 | `--keepalive SEC` / `--idle SEC` | TCP 保活（默认 30，0 = 关）/ 空闲超时（默认 900） |
+| `--block KB` | 每次读写的数据块大小，`16`~`4096` KB（默认 `256`）；调大能让每次写入更长，慢盘上少换道 |
 | `--maxclients N` | 并发连接上限，默认 `64` |
 | `--log FILE` / `--noprogress` | 日志同时落盘 / 不画实时进度行 |
 | `--flush` | 上传完成后强制落盘再回 226（慢盘别开，见手册 FAQ） |
@@ -51,9 +52,11 @@ Windows 上一个小巧的 FTP 服务器：双击 exe → 点一下「启动服�
 - **共享范围** —— 全部硬盘当虚拟根（`/C:/`、`/D:/`），或只共享一个文件夹
 - **独立设置页** —— 端口、账号、匿名、只读、空闲超时、TCP 保活、数据端口范围、IP 白名单、日志、开机自启
 - **实时速度行** —— **最多五行**原地刷新，不刷屏；并发的传输超过五个时，末行变成 `... +N more running, total X/s`（总速率）；传输结束留一条带平均速度的汇总
-- **大文件稳** —— 每个会话只开一个被动监听（不烧端口）、双通道 TCP 保活、1 MB 套接字缓冲、256 KB 传输块、`REST` 断点续传
+- **大文件稳** —— 每个会话只开一个被动监听（不烧端口）、双通道 TCP 保活、1 MB 套接字缓冲、传输块大小可调（默认 256 KB，`--block`）、`REST` 断点续传
 - **适配多线程传输** —— MT 管理器式的分段/多线程上传不会再互相截断；
   目标盘是机械硬盘时建议少开并发（磁头换道会拖慢每一路）
+- **`--block` 可调块大小** —— 上传先攒满一块再落盘：块越大单次写入越长、换道越少，慢盘上更顺
+  （`16`~`4096` KB，默认 `256`）
 - **可诊断** —— 每个会话都记录**为什么断**，传输失败带 Winsock 错误码；小于 8 MB 的客户端校验读取只记一行，不刷噪音
 - **托盘** —— 点 × 缩到托盘继续跑；双击打开，右键停止 / 退出
 - **图标 + 版本信息** —— 那只小鲸鱼就在 exe 里（`icon.rc`，资源 id 1）
@@ -86,6 +89,7 @@ x86_64-w64-mingw32-g++ -O2 -std=c++17 -static -Wall -mwindows \
 cd test && sh run_test.sh          # 进度行            14 条断言
 cd test && sh run_segment_test.sh  # 分段上传截断保护   9 条
 cd test && sh run_allow_test.sh    # IP 白名单 CIDR    16 条
+cd test && sh run_block_test.sh    # 读写块大小          11 条
 ```
 
 ## 文档
@@ -137,8 +141,8 @@ Double-click it and you get a small window (no console box; the task manager sho
   add firewall rules, a live speed line, and a log box that says who connected and why a
   session ended
 - **Settings…** — share scope (all drives / one folder), account, port, concurrency, idle
-  timeout, TCP keep-alive, passive data-port range, IP allow list, read-only, log file,
-  autostart, tray behaviour: everything adjustable lives on that one page
+  timeout, TCP keep-alive, passive data-port range, block size, IP allow list, read-only,
+  log file, autostart, tray behaviour: everything adjustable lives on that one page
 - **Tray** — the × hides the window and the server keeps running; double-click to reopen,
   right-click to stop / quit
 - Settings are stored in `ftpsrv.ini` next to the exe and reloaded next time
@@ -157,6 +161,7 @@ Double-clicking also works (all drives, default account), but it really shines w
 | `--pasv-range L-H` | passive data-port range, default `50000-50100` |
 | `--keepalive SEC` / `--idle SEC` | TCP keep-alive (30, 0 = off) / idle timeout (900) |
 | `--maxclients N` | concurrent connection limit, default `64` |
+| `--block KB` | read/write block size in KB, `16`-`4096` (default `256`; bigger = fewer disk seeks) |
 | `--log FILE` / `--noprogress` | also write a log file / no live speed line |
 | `--flush` | flush uploads to disk before the `226` (skip it on slow disks) |
 | `--addfw` | add the Windows Firewall rules (needs administrator) |
@@ -174,9 +179,12 @@ Ctrl+C stops the server.
   more than five transfers at once the last line becomes `... +N more running, total X/s`;
   a transfer leaves one summary line with the average speed
 - **Stable big transfers** — one passive listener reused per session (no port churn),
-  TCP keep-alive on both channels, 1 MB socket buffers, 256 KB blocks, `REST` resume
+  TCP keep-alive on both channels, 1 MB socket buffers, a configurable block size
+  (256 KB by default, `--block`), `REST` resume
 - **Multi-threaded transfers** — MT Manager style segmented uploads no longer truncate each other;
   on a spinning disk keep the parallelism low (the head seeks between files)
+- **Adjustable block size** — uploads gather a whole block before writing, so `--block 1024`
+  turns many small pieces into longer sequential writes (16-4096 KB, 256 by default)
 - **Diagnosable** — every session logs *why* it ended, failed transfers carry the Winsock
   error code, and small client-side verify reads are logged as a single quiet line
 - **Tray** — closing the window keeps serving; double-click to reopen, right-click to stop / quit
@@ -204,6 +212,7 @@ One engine + two thin front ends — no runtime, no dependencies.
 cd test && sh run_test.sh          # live progress line            14 asserts
 cd test && sh run_segment_test.sh  # segmented-upload truncation    9 asserts
 cd test && sh run_allow_test.sh    # IP allow-list CIDR           16 asserts
+cd test && sh run_block_test.sh    # read/write block size        11 asserts
 ```
 
 ## Docs

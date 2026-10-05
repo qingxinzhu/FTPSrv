@@ -58,6 +58,7 @@
 #define IDS_FLUSH         1118
 #define IDS_ALLOW         1119
 #define IDS_TRAY          1122
+#define IDS_BLOCK         1123
 #define IDS_OK            1120
 #define IDS_CANCEL        1121
 
@@ -89,7 +90,7 @@ static HWND s_user = nullptr, s_pass = nullptr, s_anon = nullptr;
 static HWND s_port = nullptr, s_maxc = nullptr, s_idle = nullptr, s_ip = nullptr, s_ka = nullptr;
 static HWND s_plow = nullptr, s_phigh = nullptr;
 static HWND s_ro = nullptr, s_logf = nullptr, s_auto = nullptr, s_flush = nullptr;
-static HWND s_allow = nullptr, s_tray = nullptr;
+static HWND s_allow = nullptr, s_tray = nullptr, s_blk = nullptr;
 
 // main-window control handles
 static HWND m_status = nullptr, m_summary = nullptr, m_addr = nullptr;
@@ -116,6 +117,7 @@ struct Settings {
     int          keepAliveSec = 30;
     int          pasvLow  = 50000;      // data channel port range
     int          pasvHigh = 50100;
+    int          blockKB   = 256;       // read/write block (KB); bigger = fewer disk seeks
     bool         flushOnFinish = false; // flush each upload to disk before 226
     bool         trayOnClose = true;    // close button hides to the tray
     std::string  allowList;           // optional client IP allow list
@@ -169,6 +171,7 @@ static void loadSettings()
     g_set.pasvLow  = GetPrivateProfileIntW(L"ftp", L"pasvlow", 50000, f);
     g_set.pasvHigh = GetPrivateProfileIntW(L"ftp", L"pasvhigh", 50100, f);
     g_set.flushOnFinish = GetPrivateProfileIntW(L"ftp", L"flush", 0, f) != 0;
+    g_set.blockKB    = GetPrivateProfileIntW(L"ftp", L"block", 256, f);
     g_set.trayOnClose = GetPrivateProfileIntW(L"ftp", L"tray", 1, f) != 0;
 
     wchar_t buf[1024];
@@ -186,6 +189,8 @@ static void loadSettings()
     if (g_set.port <= 0 || g_set.port > 65535)         g_set.port = 2121;
     if (g_set.idleSec <= 0)                            g_set.idleSec = 900;
     if (g_set.maxClients <= 0)                         g_set.maxClients = 64;
+    if (g_set.blockKB < 16)                            g_set.blockKB = 16;
+    if (g_set.blockKB > 4096)                          g_set.blockKB = 4096;
     if (g_set.mode != 0 && g_set.mode != 1)            g_set.mode = 0;
 }
 
@@ -205,6 +210,7 @@ static void saveSettings()
     swprintf(b, 64, L"%d", g_set.pasvLow);   WritePrivateProfileStringW(L"ftp", L"pasvlow", b, f);
     swprintf(b, 64, L"%d", g_set.pasvHigh);  WritePrivateProfileStringW(L"ftp", L"pasvhigh", b, f);
     swprintf(b, 64, L"%d", g_set.flushOnFinish ? 1 : 0); WritePrivateProfileStringW(L"ftp", L"flush", b, f);
+    swprintf(b, 64, L"%d", g_set.blockKB);   WritePrivateProfileStringW(L"ftp", L"block", b, f);
 
     WritePrivateProfileStringW(L"ftp", L"root", g_set.root.c_str(), f);
     WritePrivateProfileStringW(L"ftp", L"user", mbToW(g_set.user, CP_ACP).c_str(), f);
@@ -490,6 +496,8 @@ static void startServer(HWND owner)
     g_cfg.pasvLow    = g_set.pasvLow;
     g_cfg.pasvHigh   = g_set.pasvHigh;
     g_cfg.flushOnFinish = g_set.flushOnFinish;
+    g_cfg.blockKB    = g_set.blockKB;
+    clampBlock();
     g_cfg.allowList  = g_set.allowList;
     g_cfg.rootDir    = (g_set.mode == 1) ? g_set.root : std::wstring();
     g_cfg.allDrives  = (g_set.mode == 0);
@@ -586,6 +594,12 @@ static bool readSettingsFromUi(HWND owner)
         SetFocus(s_ka);
         return false;
     }
+    int blk = getInt(s_blk, 256);
+    if (blk < 16 || blk > 4096) {
+        MessageBoxW(owner, L"写入块大小要在 16 到 4096 之间（单位 KB，默认 256）。", L"设置", MB_ICONWARNING);
+        SetFocus(s_blk);
+        return false;
+    }
     int plow = getInt(s_plow, 50000);
     int phigh = getInt(s_phigh, 50100);
     if (plow < 1024 || phigh > 65535 || plow >= phigh || phigh - plow > 4096) {
@@ -628,6 +642,7 @@ static bool readSettingsFromUi(HWND owner)
     g_set.maxClients = mc;
     g_set.keepAliveSec = ka;
     g_set.flushOnFinish = (SendMessageW(s_flush, BM_GETCHECK, 0, 0) == BST_CHECKED);
+    g_set.blockKB = blk;
     g_set.trayOnClose = (SendMessageW(s_tray, BM_GETCHECK, 0, 0) == BST_CHECKED);
     g_set.allowList = getTextA(s_allow);
     g_set.pasvLow = plow;
@@ -687,7 +702,7 @@ static void openSettings(HWND owner)
 {
     if (g_setOpen) { SetForegroundWindow(g_hSet); return; }
 
-    int cw = 400, ch = 596;
+    int cw = 400, ch = 632;
     DWORD style = WS_POPUP | WS_CAPTION | WS_SYSMENU;
     RECT r = { 0, 0, cw, ch };
     AdjustWindowRectEx(&r, style, FALSE, WS_EX_DLGMODALFRAME);
@@ -752,7 +767,7 @@ static void openSettings(HWND owner)
     fillIpCombo();
 
     Y = 408;
-    mk(g_hSet, 0, L"BUTTON", L"其它", BS_GROUPBOX, X, Y, W, 149, -1, g_font);
+    mk(g_hSet, 0, L"BUTTON", L"其它", BS_GROUPBOX, X, Y, W, 184, -1, g_font);
     s_tray = mk(g_hSet, 0, L"BUTTON", L"关闭窗口时缩到托盘", BS_AUTOCHECKBOX, X + 214, Y + 24, 160, 22, IDS_TRAY, g_font);
     s_ro   = mk(g_hSet, 0, L"BUTTON", L"只读模式（禁止上传/删除）", BS_AUTOCHECKBOX, X + 14, Y + 24, 200, 22, IDS_READONLY, g_font);
     s_logf = mk(g_hSet, 0, L"BUTTON", L"记录日志到 ftpsrv.log", BS_AUTOCHECKBOX, X + 14, Y + 50, 200, 22, IDS_LOGFILE, g_font);
@@ -768,9 +783,15 @@ static void openSettings(HWND owner)
        SS_LEFT, X + 14, Y + 108, 360, 18, -1, g_font);
     s_allow = mk(g_hSet, WS_EX_CLIENTEDGE, L"EDIT", L"", ES_AUTOHSCROLL, X + 14, Y + 126, 360, 22, IDS_ALLOW, g_font);
     setText(s_allow, mbToW(g_set.allowList, CP_ACP));
+    mk(g_hSet, 0, L"STATIC", L"写入块大小(KB)", SS_LEFT, X + 14, Y + 158, 100, 20, -1, g_font);
+    s_blk = mk(g_hSet, WS_EX_CLIENTEDGE, L"EDIT", L"", ES_AUTOHSCROLL | ES_NUMBER,
+               X + 118, Y + 156, 66, 22, IDS_BLOCK, g_font);
+    mk(g_hSet, 0, L"STATIC", L"16~4096，默认 256；慢盘上可调大（每次读写的数据量）",
+       SS_LEFT, X + 190, Y + 160, 180, 20, -1, g_font);
+    setEditInt(s_blk, g_set.blockKB);
 
-    HWND ok = mk(g_hSet, 0, L"BUTTON", L"确定", BS_DEFPUSHBUTTON, 200, 566, 90, 26, IDS_OK, g_font);
-    mk(g_hSet, 0, L"BUTTON", L"取消", BS_PUSHBUTTON, 300, 566, 90, 26, IDS_CANCEL, g_font);
+    HWND ok = mk(g_hSet, 0, L"BUTTON", L"确定", BS_DEFPUSHBUTTON, 200, 602, 90, 26, IDS_OK, g_font);
+    mk(g_hSet, 0, L"BUTTON", L"取消", BS_PUSHBUTTON, 300, 602, 90, 26, IDS_CANCEL, g_font);
 
     g_setOpen = true;
     EnableWindow(owner, FALSE);
