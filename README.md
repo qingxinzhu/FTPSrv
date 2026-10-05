@@ -57,7 +57,9 @@ Windows 上一个小巧的 FTP 服务器：双击 exe → 点一下「启动服�
   目标盘是机械硬盘时建议少开并发（磁头换道会拖慢每一路）
 - **`--block` 可调块大小** —— 上传先攒满一块再落盘：块越大单次写入越长、换道越少，慢盘上更顺
   （`16`~`4096` KB，默认 `256`）
-- **可诊断** —— 每个会话都记录**为什么断**，传输失败带 Winsock 错误码；小于 8 MB 的客户端校验读取只记一行，不刷噪音
+- **可诊断** —— 每个会话都记录**为什么断**，传输失败带 Winsock 错误码；打不开文件时连
+  **完整路径 + Win32 错误码**一起记（是被占用、没权限，还是路径过长，一目了然）
+- **长路径也能传** —— 目录嵌套超过 259 个字符的深层文件照样能读写（自动使用长路径前缀）
 - **托盘** —— 点 × 缩到托盘继续跑；双击打开，右键停止 / 退出
 - **图标 + 版本信息** —— 那只小鲸鱼就在 exe 里（`icon.rc`，资源 id 1）
 
@@ -90,6 +92,7 @@ cd test && sh run_test.sh          # 进度行            14 条断言
 cd test && sh run_segment_test.sh  # 分段上传截断保护   9 条
 cd test && sh run_allow_test.sh    # IP 白名单 CIDR    16 条
 cd test && sh run_block_test.sh    # 读写块大小          11 条
+cd test && sh run_longpath_test.sh # 长路径前缀           7 条
 ```
 
 ## 文档
@@ -186,7 +189,9 @@ Ctrl+C stops the server.
 - **Adjustable block size** — uploads gather a whole block before writing, so `--block 1024`
   turns many small pieces into longer sequential writes (16-4096 KB, 256 by default)
 - **Diagnosable** — every session logs *why* it ended, failed transfers carry the Winsock
-  error code, and small client-side verify reads are logged as a single quiet line
+  error code, and a file that cannot be opened is logged with its **full path plus the
+  Win32 error code** (locked, denied, or path too long - you can tell them apart)
+- **Long paths work** — deeply nested files (paths past 259 characters) read and write fine
 - **Tray** — closing the window keeps serving; double-click to reopen, right-click to stop / quit
 - **Icon + version info** — the little whale is inside the exe (`icon.rc`, resource id 1)
 
@@ -213,6 +218,7 @@ cd test && sh run_test.sh          # live progress line            14 asserts
 cd test && sh run_segment_test.sh  # segmented-upload truncation    9 asserts
 cd test && sh run_allow_test.sh    # IP allow-list CIDR           16 asserts
 cd test && sh run_block_test.sh    # read/write block size        11 asserts
+cd test && sh run_longpath_test.sh # long-path prefix              7 asserts
 ```
 
 ## Docs

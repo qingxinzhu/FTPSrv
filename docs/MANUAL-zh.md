@@ -151,6 +151,13 @@ DOWN archive-03.zip         88.00 MB/400.00 MB 30.05 MB/s
 上传的数据会**先攒满一块再写盘**（默认 256 KB，见 `--block`）：块大一些，一次写入的连续区域更长，
 机械盘就不用每来一小包就换一次道。
 
+**路径很深的文件（超过 259 个字符）**：Windows 的普通文件接口到 260 就停了，这类文件以前会以
+`550` 失败。现在程序会自己给路径加上长路径前缀（`\\?\`），多深的目录都能正常读写。
+
+**打不开文件时，日志会写清楚原因**：完整路径 + Win32 错误码 + 一句人话提示
+（比如 `cannot open (Win32 error 32: sharing violation - another program is holding the file)`、
+`Win32 error 3: a folder in the path is missing, or the path is too long`）。
+
 另外两处细节：上传完成后要不要先 `FlushFileBuffers` 落盘再回 `226`，由设置页「传输完成后强制写入磁盘」控制，**默认不勾**（原因见 FAQ 第 8 条：几 GB 的文件在机械盘上落盘要几十秒，客户端等 `226` 会等到超时）；发送遇到 `WSAEINTR` 会自动重试而不是直接判失败。
 
 **相关设置**（图形版「设置… → 网络与限制 → TCP保活(秒)」；命令行 `--keepalive SEC`）：

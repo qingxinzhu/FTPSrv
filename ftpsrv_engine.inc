@@ -409,6 +409,42 @@ static std::string virtualOf(const std::vector<std::string>& toks)
     return r;
 }
 
+// Windows file APIs stop at 260 characters unless the path carries the \\?\ prefix.
+// Every path this server hands to Win32 is absolute, so adding the prefix here is
+// safe (and it also passes names with trailing dots/spaces through unchanged).
+static const wchar_t kBs = (wchar_t)92;                 // backslash
+static const std::wstring kLongPrefix = std::wstring(2, kBs) + L"?" + kBs;        // two Bs + ? + B
+static const std::wstring kLongUnc    = kLongPrefix + L"UNC" + kBs;              // ... + UNC + B
+
+// Windows file APIs stop at 260 characters unless the path carries the long-path
+// prefix (two backslashes, a question mark, a backslash).  Every path this
+// server hands to Win32 is absolute, so adding it here is safe - and it also lets
+// names with trailing dots or spaces through unchanged.  Spelled with (wchar_t)92
+// on purpose: no escape sequences to get wrong.
+static std::wstring longPath(const std::wstring& abs)
+{
+    if (abs.size() >= 4 && abs[0] == kBs && abs[1] == kBs && abs[2] == '?' && abs[3] == kBs)
+        return abs;                                       // already prefixed
+    if (abs.size() >= 2 && abs[1] == ':')
+        return kLongPrefix + abs;                         // C:... -> prefixed C:...
+    if (abs.size() >= 2 && abs[0] == kBs && abs[1] == kBs)
+        return kLongUnc + abs.substr(2);                  // UNC share -> prefixed UNC
+    return abs;                                           // relative: leave it alone
+}
+// Short, human readable hint for the GetLastError() values that show up here.
+static const char* winErrHint(DWORD e)
+{
+    switch (e) {
+    case 2:   return "file not found";
+    case 3:   return "a folder in the path is missing, or the path is too long";
+    case 5:   return "access denied";
+    case 32:  return "sharing violation - another program is holding the file";
+    case 123: return "invalid name";
+    case 206: return "filename or extension too long";
+    default:  return "";
+    }
+}
+
 static Resolved resolvePath(Session& s, const std::string& rawInternal)
 {
     Resolved r;
@@ -440,7 +476,7 @@ static Resolved resolvePath(Session& s, const std::string& rawInternal)
         w += L":";
         for (size_t i = 1; i < r.toks.size(); ++i) { w += L"\\"; w += u8ToW(r.toks[i]); }
         if (w.size() == 2) w += L"\\";   // "C:" -> "C:\"
-        r.phys = w;
+        r.phys = longPath(w);
         r.ok = true;
         return r;
     }
@@ -449,7 +485,7 @@ static Resolved resolvePath(Session& s, const std::string& rawInternal)
     std::wstring w = g_cfg.rootDir;
     while (!w.empty() && (w.back() == L'\\' || w.back() == L'/')) w.pop_back();
     for (size_t i = 0; i < r.toks.size(); ++i) { w += L"\\"; w += u8ToW(r.toks[i]); }
-    r.phys = w;
+    r.phys = longPath(w);
     r.ok = true;
     return r;
 }
@@ -926,12 +962,25 @@ static void logIfOverParallel()
 static void cmdRetr(Session& s, const std::string& argInternal)
 {
     Resolved r = resolvePath(s, argInternal);
-    if (!r.ok || r.virtRoot) { reply(s, "550 File not found."); return; }
+    if (!r.ok || r.virtRoot) {
+        logf("RETR %s: bad path (%s) (%s)", argInternal.c_str(),
+             r.err.empty() ? "not found" : r.err.c_str(), s.peerIp.c_str());
+        reply(s, "550 File not found.");
+        return;
+    }
 
     HANDLE h = CreateFileW(r.phys.c_str(), GENERIC_READ,
                            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (h == INVALID_HANDLE_VALUE) { reply(s, "550 File not found or access denied."); return; }
+    if (h == INVALID_HANDLE_VALUE) {
+        DWORD e = GetLastError();
+        logf("RETR %s: cannot open (Win32 error %lu: %s)%s (%s)",
+             wToU8(r.phys).c_str(), (unsigned long)e, winErrHint(e),
+             r.phys.size() > 255 ? " [path is longer than 259 characters]" : "",
+             s.peerIp.c_str());
+        reply(s, "550 File not found or access denied.");
+        return;
+    }
 
     DWORD attr = GetFileAttributesW(r.phys.c_str());
     if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)) {
@@ -1050,6 +1099,11 @@ static void cmdStor(Session& s, const std::string& argInternal, bool append)
                            FILE_SHARE_READ | FILE_SHARE_WRITE,
                            nullptr, disp, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (h == INVALID_HANDLE_VALUE) {
+        DWORD e = GetLastError();
+        logf("STOR %s: cannot create (Win32 error %lu: %s)%s (%s)",
+             wToU8(r.phys).c_str(), (unsigned long)e, winErrHint(e),
+             r.phys.size() > 255 ? " [path is longer than 259 characters]" : "",
+             s.peerIp.c_str());
         uploadEnd(r.phys);
         reply(s, "550 Cannot create file (access denied?).");
         return;
@@ -1405,7 +1459,12 @@ static bool dispatch(Session& s, const std::string& line)
             logf("DELE %s (%s)", wToU8(r.phys).c_str(), s.peerIp.c_str());
             reply(s, "250 File deleted.");
         }
-        else reply(s, "550 Delete failed.");
+        else {
+            DWORD e = GetLastError();
+            logf("DELE %s: failed (Win32 error %lu: %s) (%s)", wToU8(r.phys).c_str(),
+                 (unsigned long)e, winErrHint(e), s.peerIp.c_str());
+            reply(s, "550 Delete failed.");
+        }
         return true;
     }
     if (ucmd == "MKD" || ucmd == "XMKD") {
@@ -1417,6 +1476,8 @@ static bool dispatch(Session& s, const std::string& line)
             std::string v = r.toks.empty() ? std::string("/") : virtualOf(r.toks);
             replyRaw(s, std::string("257 \"") + v + "\" created.");
         } else {
+            logf("MKD %s: failed (Win32 error %lu: %s) (%s)", wToU8(r.phys).c_str(),
+                 (unsigned long)GetLastError(), winErrHint(GetLastError()), s.peerIp.c_str());
             reply(s, "550 Create directory failed.");
         }
         return true;
@@ -1426,7 +1487,11 @@ static bool dispatch(Session& s, const std::string& line)
         Resolved r = resolvePath(s, iarg);
         if (!r.ok || r.virtRoot) { reply(s, "550 Invalid path."); return true; }
         if (RemoveDirectoryW(r.phys.c_str())) reply(s, "250 Directory removed.");
-        else reply(s, "550 Remove failed (not empty or not a directory).");
+        else {
+            logf("RMD %s: failed (Win32 error %lu: %s) (%s)", wToU8(r.phys).c_str(),
+                 (unsigned long)GetLastError(), winErrHint(GetLastError()), s.peerIp.c_str());
+            reply(s, "550 Remove failed (not empty or not a directory).");
+        }
         return true;
     }
     if (ucmd == "RNFR") {
@@ -1449,7 +1514,12 @@ static bool dispatch(Session& s, const std::string& line)
         s.rnfr.clear();
         if (!a.ok || !b.ok || a.virtRoot || b.virtRoot) { reply(s, "550 Invalid path."); return true; }
         if (MoveFileW(a.phys.c_str(), b.phys.c_str())) reply(s, "250 Rename successful.");
-        else reply(s, "550 Rename failed.");
+        else {
+            logf("RNTO %s -> %s: failed (Win32 error %lu: %s) (%s)",
+                 wToU8(a.phys).c_str(), wToU8(b.phys).c_str(),
+                 (unsigned long)GetLastError(), winErrHint(GetLastError()), s.peerIp.c_str());
+            reply(s, "550 Rename failed.");
+        }
         return true;
     }
 
@@ -1459,6 +1529,11 @@ static bool dispatch(Session& s, const std::string& line)
         if (!r.ok || r.virtRoot) { reply(s, "550 Invalid path."); return true; }
         WIN32_FILE_ATTRIBUTE_DATA fad{};
         if (!GetFileAttributesExW(r.phys.c_str(), GetFileExInfoStandard, &fad)) {
+            DWORD e = GetLastError();
+            logf("%s %s: not found (Win32 error %lu: %s)%s (%s)", ucmd.c_str(),
+                 wToU8(r.phys).c_str(), (unsigned long)e, winErrHint(e),
+                 r.phys.size() > 255 ? " [path is longer than 259 characters]" : "",
+                 s.peerIp.c_str());
             reply(s, "550 Not found.");
             return true;
         }
@@ -1471,6 +1546,11 @@ static bool dispatch(Session& s, const std::string& line)
         if (!r.ok || r.virtRoot) { reply(s, "550 Invalid path."); return true; }
         WIN32_FILE_ATTRIBUTE_DATA fad{};
         if (!GetFileAttributesExW(r.phys.c_str(), GetFileExInfoStandard, &fad)) {
+            DWORD e = GetLastError();
+            logf("%s %s: not found (Win32 error %lu: %s)%s (%s)", ucmd.c_str(),
+                 wToU8(r.phys).c_str(), (unsigned long)e, winErrHint(e),
+                 r.phys.size() > 255 ? " [path is longer than 259 characters]" : "",
+                 s.peerIp.c_str());
             reply(s, "550 Not found.");
             return true;
         }
