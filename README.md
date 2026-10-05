@@ -1,5 +1,5 @@
 
-Windows 上一个小巧的 FTP 服务器，给**不想碰命令行**的人做的：双击 exe → 点一下「启动服务」，
+Windows 上一个小巧的 FTP 服务器：双击 exe → 点一下「启动服务」，
 这台电脑的硬盘（或者你指定的某个文件夹），就能被同一个 WiFi / 网线里的手机、别的电脑看到：能翻目录、能下载、也能往里传。
 
 |  |  |
@@ -111,7 +111,7 @@ MIT — 见 [LICENSE](LICENSE)。
 
 # FTPSrv (English)
 
-A small FTP server for Windows, made for people who do not want to touch a command line:
+A small FTP server for Windows:
 double-click the exe, press **Start**, and the drives of that PC (or one folder you pick) show up
 on any phone or computer on the same Wi-Fi / LAN — browse it, download from it, upload to it.
 
