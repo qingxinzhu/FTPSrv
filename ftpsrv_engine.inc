@@ -314,6 +314,8 @@ struct Session {
     int  xferFails  = 0;                 // failed transfers on this control connection
     int  slowBlocks = 0;                 // writes that took far longer than they should
     bool slowDiskLogged = false;         // "the disk is the bottleneck" warning already printed
+    unsigned long long slowMsTotal = 0;  // time this session wasted on slow disk writes
+    int  slowWrites = 0;                 // how many of them
     bool modeHintLogged = false;         // the "try active mode" hint is printed once per connection
 };
 
@@ -1148,6 +1150,7 @@ static void cmdStor(Session& s, const std::string& argInternal, bool append)
     //  otherwise the live line shows bytes + speed only.
     unsigned long long total = 0;
     if (!append && s.alloTotal > offset) total = s.alloTotal - offset;
+    const ULONGLONG t0 = GetTickCount64();   // transfer start, for the abort report
     int pslot = progBegin(true, (append ? "APPE " : "STOR ") + leaf, total);
     int xh = xferBegin();          // counted globally, for the frontend totals
 
@@ -1190,7 +1193,13 @@ static void cmdStor(Session& s, const std::string& argInternal, bool append)
         // client gives up on the slow ones and the user only sees "failed".
         // Say so once per connection instead of leaving them guessing.
         if (wms >= 100) {
-            if (++s.slowBlocks >= 8 && !s.slowDiskLogged) {
+            s.slowMsTotal += wms;
+            ++s.slowWrites;
+            // one warning per session: eight slow writes in a row (a big file on a
+            // busy disk) or a whole second wasted across slow writes (many small
+            // files, where no single file ever reaches eight blocks)
+            bool warn = (++s.slowBlocks >= 8) || (s.slowMsTotal >= 1000);
+            if (warn && !s.slowDiskLogged) {
                 s.slowDiskLogged = true;
                 logf("slow disk: writing a %d KB block took %llu ms - with %d transfers at once a "
                      "spinning disk behaves like this (an SSD, fewer parallel transfers, or a "
@@ -1213,12 +1222,29 @@ static void cmdStor(Session& s, const std::string& argInternal, bool append)
     if (ok) reply(s, "226 Transfer complete.");
     else {
         reply(s, "426 Connection closed; transfer aborted.");
-        logf("%s %s aborted after %llu bytes (socket error %d); partial file kept - "
-             "a resume with REST %llu + STOR will continue it",
+        // Everything needed to tell "the client gave up on a slow transfer" apart
+        // from "the client simply stopped sending": how long it took, the average
+        // speed, how many transfers were running, and how much of that time this
+        // session lost to slow disk writes.
+        unsigned long long el = (GetTickCount64() - t0) / 1000;
+        logf("%s %s aborted after %llu bytes in %llu s (%.0f B/s average); %d transfers "
+             "were in flight; this session lost %llu ms in %d slow disk writes "
+             "(socket error %d); partial file kept - a resume with REST %llu + STOR "
+             "will continue it",
              append ? "APPE" : "STOR", leaf.c_str(),
-             (unsigned long long)moved, g_lastSockErr,
+             (unsigned long long)moved, el,
+             el ? (double)moved / (double)el : (double)moved,
+             xferLiveCount(), s.slowMsTotal, s.slowWrites, g_lastSockErr,
              (unsigned long long)(offset + moved));
         logIfOverParallel();
+        // A long, slow transfer whose disk writes were all quick means the client
+        // stopped sending - nothing this end can fix that, but saying so saves a
+        // round of guessing every single time.
+        if (s.slowWrites == 0 && moved > 0 && el >= 10)
+            logf(" hint: the client reset this transfer after %llu s (%.0f B/s) and no "
+                 "disk write on this side was ever slow - the client stalled or stopped "
+                 "sending; fewer parallel uploads usually helps (%s)",
+                 el, el ? (double)moved / (double)el : (double)moved, s.peerIp.c_str());
         ++s.xferFails;
         if (s.xferFails >= 3 && !s.modeHintLogged) {
             s.modeHintLogged = true;

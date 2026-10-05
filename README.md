@@ -60,6 +60,8 @@ Windows 上一个小巧的 FTP 服务器：双击 exe → 点一下「启动服�
 - **可诊断** —— 每个会话都记录**为什么断**，传输失败带 Winsock 错误码；打不开文件时连
   **完整路径 + Win32 错误码**一起记（是被占用、没权限，还是路径过长，一目了然）
 - **长路径也能传** —— 目录嵌套超过 259 个字符的深层文件照样能读写（自动使用长路径前缀）
+- **中断现场写全** —— 上传/下载被打断时，日志给出耗时、平均速度、当时的并发数，以及本会话
+  在慢盘上耗掉多少毫秒：一眼分得清是目标盘慢，还是对端没有继续发送
 - **托盘** —— 点 × 缩到托盘继续跑；双击打开，右键停止 / 退出
 - **图标 + 版本信息** —— 那只小鲸鱼就在 exe 里（`icon.rc`，资源 id 1）
 
@@ -192,6 +194,8 @@ Ctrl+C stops the server.
   error code, and a file that cannot be opened is logged with its **full path plus the
   Win32 error code** (locked, denied, or path too long - you can tell them apart)
 - **Long paths work** — deeply nested files (paths past 259 characters) read and write fine
+- **A full picture of every interrupted transfer** — elapsed time, average speed, how many
+  transfers were running and how many milliseconds this session lost to slow disk writes
 - **Tray** — closing the window keeps serving; double-click to reopen, right-click to stop / quit
 - **Icon + version info** — the little whale is inside the exe (`icon.rc`, resource id 1)
 

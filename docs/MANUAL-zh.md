@@ -154,6 +154,10 @@ DOWN archive-03.zip         88.00 MB/400.00 MB 30.05 MB/s
 **路径很深的文件（超过 259 个字符）**：Windows 的普通文件接口到 260 就停了，这类文件以前会以
 `550` 失败。现在程序会自己给路径加上长路径前缀（`\\?\`），多深的目录都能正常读写。
 
+**传输被打断时，日志会写全现场**：耗时、平均速度、当时的并发数，以及本次会话在慢盘上累计
+耗掉多少毫秒（`this session lost N ms in K slow disk writes`）——磁盘慢、还是对端没有继续
+发送，一句就能分开。
+
 **打不开文件时，日志会写清楚原因**：完整路径 + Win32 错误码 + 一句人话提示
 （比如 `cannot open (Win32 error 32: sharing violation - another program is holding the file)`、
 `Win32 error 3: a folder in the path is missing, or the path is too long`）。
